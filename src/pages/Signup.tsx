@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 const Signup = () => {
+  const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -28,7 +29,7 @@ const Signup = () => {
       return;
     }
     try {
-      signup({ full_name: fullName, email, password, phone_number: phone });
+      signup({ username, full_name: fullName, email, password, phone_number: phone });
       navigate("/dashboard");
     } catch (err: any) {
       toast({ variant: "destructive", title: "Signup failed", description: err.message });
@@ -48,6 +49,10 @@ const Signup = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-card">
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input id="username" required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. johndoe" />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="name">Full Name</Label>
             <Input id="name" required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Doe" />
