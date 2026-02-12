@@ -26,8 +26,8 @@ const Navbar = () => {
               {l.label}
             </a>
           ))}
-          <Button variant="outline" size="sm">Login</Button>
-          <Button size="sm">Sign Up</Button>
+          <Button variant="outline" size="sm" asChild><a href="/login">Login</a></Button>
+          <Button size="sm" asChild><a href="/signup">Sign Up</a></Button>
         </div>
 
         {/* Mobile toggle */}
@@ -44,8 +44,8 @@ const Navbar = () => {
             </a>
           ))}
           <div className="mt-3 flex gap-2">
-            <Button variant="outline" size="sm" className="flex-1">Login</Button>
-            <Button size="sm" className="flex-1">Sign Up</Button>
+            <Button variant="outline" size="sm" className="flex-1" asChild><a href="/login">Login</a></Button>
+            <Button size="sm" className="flex-1" asChild><a href="/signup">Sign Up</a></Button>
           </div>
         </div>
       )}
