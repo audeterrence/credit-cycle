@@ -222,7 +222,127 @@ export function redeemReward(userId: string, rewardId: string): Redemption {
   return redemption;
 }
 
+// ── Admin: Submission management ──
+
+export function getAllSubmissions(): WasteSubmission[] {
+  return getSubmissions().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+export function approveSubmission(submissionId: string) {
+  const subs = getSubmissions();
+  const idx = subs.findIndex((s) => s.id === submissionId);
+  if (idx === -1) throw new Error("Submission not found");
+  if (subs[idx].status !== "PENDING") throw new Error("Only pending submissions can be approved");
+
+  subs[idx].status = "APPROVED";
+
+  // Apply focus week multiplier
+  const focusWeek = getFocusWeek();
+  let credits = subs[idx].credits_awarded;
+  if (focusWeek && focusWeek.material_id === subs[idx].material_id) {
+    credits = credits * focusWeek.multiplier;
+    subs[idx].credits_awarded = credits;
+  }
+
+  setStore("credi_submissions", subs);
+
+  // Award credits to user
+  const users = getUsers();
+  const userIdx = users.findIndex((u) => u.id === subs[idx].user_id);
+  if (userIdx !== -1) {
+    users[userIdx].total_credits += credits;
+    setStore("credi_users", users);
+  }
+
+  // Record transaction
+  const txns = getTransactions();
+  const mat = MATERIALS.find((m) => m.id === subs[idx].material_id);
+  txns.push({
+    id: uuid(),
+    user_id: subs[idx].user_id,
+    amount: credits,
+    type: "EARNED",
+    description: `Approved: ${subs[idx].quantity_units} ${mat?.name ?? "items"}${focusWeek && focusWeek.material_id === subs[idx].material_id ? " (Focus Week ×" + focusWeek.multiplier + ")" : ""}`,
+    created_at: new Date().toISOString(),
+  });
+  setStore("credi_transactions", txns);
+}
+
+export function rejectSubmission(submissionId: string) {
+  const subs = getSubmissions();
+  const idx = subs.findIndex((s) => s.id === submissionId);
+  if (idx === -1) throw new Error("Submission not found");
+  if (subs[idx].status !== "PENDING") throw new Error("Only pending submissions can be rejected");
+  subs[idx].status = "REJECTED";
+  setStore("credi_submissions", subs);
+}
+
+// ── Admin: Focus Week ──
+
+export interface FocusWeek {
+  material_id: string;
+  multiplier: number;
+  label: string;
+  started_at: string;
+}
+
+export function getFocusWeek(): FocusWeek | null {
+  return getStore<FocusWeek | null>("credi_focus_week", null);
+}
+
+export function setFocusWeek(materialId: string, multiplier: number): FocusWeek {
+  const mat = MATERIALS.find((m) => m.id === materialId);
+  if (!mat) throw new Error("Material not found");
+  const fw: FocusWeek = {
+    material_id: materialId,
+    multiplier,
+    label: mat.name,
+    started_at: new Date().toISOString(),
+  };
+  setStore("credi_focus_week", fw);
+  return fw;
+}
+
+export function clearFocusWeek() {
+  localStorage.removeItem("credi_focus_week");
+}
+
+// ── Admin: Stats ──
+
+export function getAdminStats() {
+  const subs = getSubmissions();
+  const users = getUsers();
+  return {
+    totalUsers: users.filter((u) => u.role === "USER").length,
+    pendingCount: subs.filter((s) => s.status === "PENDING").length,
+    approvedCount: subs.filter((s) => s.status === "APPROVED").length,
+    rejectedCount: subs.filter((s) => s.status === "REJECTED").length,
+    totalCreditsAwarded: subs.filter((s) => s.status === "APPROVED").reduce((a, s) => a + s.credits_awarded, 0),
+  };
+}
+
 // ── Seed demo data ──
+
+export function ensureAdminExists() {
+  const users = getUsers();
+  if (!users.some((u) => u.email === "admin@credican.cm")) {
+    const admin: User = {
+      id: uuid(),
+      full_name: "Admin",
+      email: "admin@credican.cm",
+      password_hash: simpleHash("admin123"),
+      phone_number: "+237600000000",
+      role: "ADMIN",
+      total_credits: 0,
+      created_at: new Date().toISOString(),
+    };
+    users.push(admin);
+    setStore("credi_users", users);
+  }
+}
+
+// Ensure admin exists on module load
+ensureAdminExists();
 
 export function seedDemoData(userId: string) {
   const subs = getSubmissions();

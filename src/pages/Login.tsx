@@ -17,8 +17,8 @@ const Login = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      login(email, password);
-      navigate("/dashboard");
+      const loggedIn = login(email, password);
+      navigate(loggedIn.role === "ADMIN" ? "/admin" : "/dashboard");
     } catch (err: any) {
       toast({ variant: "destructive", title: "Login failed", description: err.message });
     }
@@ -52,6 +52,10 @@ const Login = () => {
           Don't have an account?{" "}
           <Link to="/signup" className="font-medium text-primary hover:underline">Sign up</Link>
         </p>
+        <div className="rounded-lg border border-border bg-secondary/50 p-3 text-center text-xs text-muted-foreground">
+          <p className="font-medium">Admin demo login:</p>
+          <p>admin@credican.cm / admin123</p>
+        </div>
       </div>
     </div>
   );
