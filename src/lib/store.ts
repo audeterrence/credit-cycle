@@ -222,6 +222,49 @@ export function redeemReward(userId: string, rewardId: string): Redemption {
   return redemption;
 }
 
+// ── Seed demo data ──
+
+export function seedDemoData(userId: string) {
+  const subs = getSubmissions();
+  // Only seed once per user
+  if (subs.some((s) => s.user_id === userId)) return;
+
+  const now = Date.now();
+  const day = 86400000;
+  const demoSubmissions: WasteSubmission[] = [
+    { id: uuid(), user_id: userId, material_id: "mat-plastic", quantity_units: 12, weight_kg: 0.6, credits_awarded: 24, status: "APPROVED", created_at: new Date(now - 6 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-metal", quantity_units: 5, weight_kg: 2.5, credits_awarded: 25, status: "APPROVED", created_at: new Date(now - 5 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-cans", quantity_units: 20, weight_kg: 1.0, credits_awarded: 60, status: "APPROVED", created_at: new Date(now - 4 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-glass", quantity_units: 8, weight_kg: 3.2, credits_awarded: 32, status: "APPROVED", created_at: new Date(now - 3 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-plastic", quantity_units: 6, weight_kg: 0.3, credits_awarded: 12, status: "PENDING", created_at: new Date(now - 1 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-cans", quantity_units: 10, weight_kg: null, credits_awarded: 30, status: "REJECTED", created_at: new Date(now - 2 * day).toISOString() },
+  ];
+
+  const approvedCredits = demoSubmissions.filter((s) => s.status === "APPROVED").reduce((a, s) => a + s.credits_awarded, 0);
+
+  // Save submissions
+  setStore("credi_submissions", [...subs, ...demoSubmissions]);
+
+  // Save transactions
+  const txns = getTransactions();
+  demoSubmissions.filter((s) => s.status === "APPROVED").forEach((s) => {
+    const mat = MATERIALS.find((m) => m.id === s.material_id);
+    txns.push({ id: uuid(), user_id: userId, amount: s.credits_awarded, type: "EARNED", description: `Recycled ${s.quantity_units} ${mat?.name ?? "items"}`, created_at: s.created_at });
+  });
+  // Bonus
+  txns.push({ id: uuid(), user_id: userId, amount: 50, type: "BONUS", description: "Weekly leaderboard bonus (#2)", created_at: new Date(now - 2 * day).toISOString() });
+  setStore("credi_transactions", txns);
+
+  // Update user credits
+  const users = getUsers();
+  const idx = users.findIndex((u) => u.id === userId);
+  if (idx !== -1) {
+    users[idx].total_credits = approvedCredits + 50;
+    setStore("credi_users", users);
+    setCurrentUser(users[idx]);
+  }
+}
+
 // ── Stats helpers ──
 
 export function getUserMaterialStats(userId: string) {
