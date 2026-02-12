@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  Recycle, LogOut, Search, UserPlus, Package, Zap, Trash2, CheckCircle, Users, Coins,
+  Recycle, LogOut, Search, UserPlus, Package, CheckCircle, Users, Coins,
+  BarChart3, User as UserIcon, Phone, Mail, Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   searchUsers, registerUser, submitAndApproveWaste,
-  getFocusWeek, setFocusWeek, clearFocusWeek, MATERIALS, getUsers, getUserSubmissions,
-  getAdminStats, type User,
+  getFocusWeek, MATERIALS, getUsers, getUserSubmissions,
+  getAllSubmissions, type User,
 } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
 
@@ -39,10 +40,6 @@ const AdminDashboard = () => {
   const [quantity, setQuantity] = useState("");
   const [weight, setWeight] = useState("");
 
-  // Focus week
-  const [focusMaterial, setFocusMaterial] = useState("");
-  const [focusMultiplier, setFocusMultiplier] = useState("2");
-
   useEffect(() => {
     if (!user || user.role !== "ADMIN") navigate("/login", { replace: true });
   }, [user, navigate]);
@@ -50,7 +47,25 @@ const AdminDashboard = () => {
   if (!user || user.role !== "ADMIN") return null;
 
   const currentFocusWeek = getFocusWeek();
-  const stats = getAdminStats();
+
+  // Kiosk manager performance stats
+  const allSubs = getAllSubmissions();
+  const todaySubs = allSubs.filter(s => new Date(s.created_at).toDateString() === new Date().toDateString());
+  const todayCredits = todaySubs.reduce((a, s) => a + s.credits_awarded, 0);
+  const todayUsers = new Set(todaySubs.map(s => s.user_id)).size;
+  const totalSubs = allSubs.length;
+  const totalCredits = allSubs.reduce((a, s) => a + s.credits_awarded, 0);
+
+  // Material breakdown for reports
+  const materialBreakdown = MATERIALS.map(m => {
+    const subs = allSubs.filter(s => s.material_id === m.id);
+    return {
+      material: m,
+      count: subs.length,
+      units: subs.reduce((a, s) => a + s.quantity_units, 0),
+      credits: subs.reduce((a, s) => a + s.credits_awarded, 0),
+    };
+  });
 
   const handleSearch = () => {
     const results = searchUsers(searchQuery);
@@ -102,23 +117,6 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleSetFocusWeek = () => {
-    if (!focusMaterial) return;
-    try {
-      setFocusWeek(focusMaterial, Number(focusMultiplier) || 2);
-      setTick((t) => t + 1);
-      toast({ title: "Focus Week activated!", description: `${MATERIALS.find(m => m.id === focusMaterial)?.name} now earns ×${focusMultiplier} credits.` });
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Error", description: err.message });
-    }
-  };
-
-  const handleClearFocusWeek = () => {
-    clearFocusWeek();
-    setTick((t) => t + 1);
-    toast({ title: "Focus Week cleared" });
-  };
-
   const handleLogout = () => { logout(); navigate("/"); };
 
   const userHistory = selectedUser ? getUserSubmissions(selectedUser.id).slice(-5).reverse() : [];
@@ -141,18 +139,30 @@ const AdminDashboard = () => {
       </header>
 
       <main className="container max-w-5xl py-8 space-y-6">
-        {/* ── Stats Overview ── */}
+        {/* Quick stats bar */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={<Users className="h-5 w-5 text-primary" />} label="Total Users" value={stats.totalUsers} />
-          <StatCard icon={<Package className="h-5 w-5 text-bin-orange" />} label="Total Submissions" value={stats.approvedCount} />
-          <StatCard icon={<Coins className="h-5 w-5 text-accent" />} label="Credits Awarded" value={stats.totalCreditsAwarded} />
-          <StatCard icon={<Zap className="h-5 w-5 text-primary" />} label="Focus Week" value={currentFocusWeek ? `×${currentFocusWeek.multiplier}` : "None"} />
+          <StatCard icon={<CheckCircle className="h-5 w-5 text-primary" />} label="Today's Submissions" value={todaySubs.length} />
+          <StatCard icon={<Coins className="h-5 w-5 text-accent" />} label="Today's Credits" value={todayCredits} />
+          <StatCard icon={<Users className="h-5 w-5 text-primary" />} label="Users Served Today" value={todayUsers} />
+          <StatCard icon={<Package className="h-5 w-5 text-primary" />} label="All-Time Submissions" value={totalSubs} />
         </div>
+
+        {/* Active Focus Week banner */}
+        {currentFocusWeek && (
+          <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/10 p-3">
+            <span className="text-lg">⚡</span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Focus Week Active: {currentFocusWeek.label} — ×{currentFocusWeek.multiplier} credits</p>
+              <p className="text-xs text-muted-foreground">Since {new Date(currentFocusWeek.started_at).toLocaleDateString()}</p>
+            </div>
+          </div>
+        )}
 
         <Tabs defaultValue="kiosk" className="space-y-4">
           <TabsList>
             <TabsTrigger value="kiosk" className="gap-1"><CheckCircle className="h-4 w-4" /> Kiosk</TabsTrigger>
-            <TabsTrigger value="focus" className="gap-1"><Zap className="h-4 w-4" /> Focus Week</TabsTrigger>
+            <TabsTrigger value="reports" className="gap-1"><BarChart3 className="h-4 w-4" /> Reports</TabsTrigger>
+            <TabsTrigger value="profile" className="gap-1"><UserIcon className="h-4 w-4" /> Profile</TabsTrigger>
           </TabsList>
 
           {/* ── Kiosk Tab ── */}
@@ -286,50 +296,112 @@ const AdminDashboard = () => {
             )}
           </TabsContent>
 
-
-
-          {/* ── Focus Week Tab ── */}
-          <TabsContent value="focus">
+          {/* ── Reports Tab ── */}
+          <TabsContent value="reports" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Zap className="h-5 w-5 text-accent" /> Material Focus Week</CardTitle>
-                <CardDescription>Boost credits for a specific material type to encourage collection.</CardDescription>
+                <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-primary" /> Kiosk Performance</CardTitle>
+                <CardDescription>Summary of all collections processed at this kiosk.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Summary stats */}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
+                    <p className="text-2xl font-bold text-foreground">{totalSubs}</p>
+                    <p className="text-xs text-muted-foreground">Total Collections</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
+                    <p className="text-2xl font-bold text-primary">{totalCredits}</p>
+                    <p className="text-xs text-muted-foreground">Total Credits Awarded</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
+                    <p className="text-2xl font-bold text-foreground">{new Set(allSubs.map(s => s.user_id)).size}</p>
+                    <p className="text-xs text-muted-foreground">Unique Users Served</p>
+                  </div>
+                </div>
+
+                {/* Material breakdown */}
+                <div>
+                  <p className="mb-3 text-sm font-semibold text-foreground">Material Breakdown</p>
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-secondary text-secondary-foreground">
+                        <tr>
+                          <th className="px-4 py-2 text-left">Material</th>
+                          <th className="px-4 py-2 text-left">Bin</th>
+                          <th className="px-4 py-2 text-right">Collections</th>
+                          <th className="px-4 py-2 text-right">Units</th>
+                          <th className="px-4 py-2 text-right">Credits</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materialBreakdown.map((row) => (
+                          <tr key={row.material.id} className="border-t border-border">
+                            <td className="px-4 py-2 font-medium text-foreground">{row.material.name}</td>
+                            <td className="px-4 py-2 text-muted-foreground">{row.material.bin_color}</td>
+                            <td className="px-4 py-2 text-right">{row.count}</td>
+                            <td className="px-4 py-2 text-right">{row.units}</td>
+                            <td className="px-4 py-2 text-right font-semibold text-primary">{row.credits}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Profile Tab ── */}
+          <TabsContent value="profile">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><UserIcon className="h-5 w-5 text-primary" /> My Profile</CardTitle>
+                <CardDescription>Your kiosk manager account details.</CardDescription>
               </CardHeader>
               <CardContent>
-                {currentFocusWeek ? (
-                  <div className="flex flex-wrap items-center gap-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
-                    <div className="flex-1">
-                      <p className="text-lg font-bold text-foreground">
-                        {currentFocusWeek.label} — <span className="text-primary">×{currentFocusWeek.multiplier}</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">Since {new Date(currentFocusWeek.started_at).toLocaleDateString()}</p>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <UserIcon className="h-8 w-8" />
                     </div>
-                    <Button variant="destructive" size="sm" onClick={handleClearFocusWeek}>
-                      <Trash2 className="mr-1 h-4 w-4" /> End
-                    </Button>
+                    <div>
+                      <p className="text-xl font-bold text-foreground">{user.full_name}</p>
+                      <p className="text-sm text-muted-foreground">@{user.username} · Kiosk Manager</p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex flex-wrap items-end gap-4">
-                    <div className="flex-1 min-w-[180px]">
-                      <Label>Material</Label>
-                      <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" value={focusMaterial} onChange={(e) => setFocusMaterial(e.target.value)}>
-                        <option value="">Select…</option>
-                        {MATERIALS.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
-                      </select>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Email</p>
+                        <p className="text-sm font-medium text-foreground">{user.email}</p>
+                      </div>
                     </div>
-                    <div className="w-28">
-                      <Label>Multiplier</Label>
-                      <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" value={focusMultiplier} onChange={(e) => setFocusMultiplier(e.target.value)}>
-                        <option value="1.5">×1.5</option>
-                        <option value="2">×2</option>
-                        <option value="3">×3</option>
-                      </select>
+                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Phone</p>
+                        <p className="text-sm font-medium text-foreground">{user.phone_number}</p>
+                      </div>
                     </div>
-                    <Button onClick={handleSetFocusWeek} disabled={!focusMaterial}>
-                      <Zap className="mr-1 h-4 w-4" /> Activate
-                    </Button>
+                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Account Created</p>
+                        <p className="text-sm font-medium text-foreground">{new Date(user.created_at).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+                      <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Role</p>
+                        <p className="text-sm font-medium text-foreground">Kiosk Manager</p>
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
