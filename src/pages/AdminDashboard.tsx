@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  Recycle, LogOut, Search, UserPlus, Package, Zap, Trash2, CheckCircle, Users,
-  BarChart3, TrendingUp, Coins, Activity,
+  Recycle, LogOut, Search, UserPlus, Package, Zap, Trash2, CheckCircle, Users, Coins,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   searchUsers, registerUser, submitAndApproveWaste,
   getFocusWeek, setFocusWeek, clearFocusWeek, MATERIALS, getUsers, getUserSubmissions,
-  getAdminStats, getAllSubmissions, getTransactions,
-  type User, type FocusWeek,
+  getAdminStats, type User,
 } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
 
@@ -53,9 +51,6 @@ const AdminDashboard = () => {
 
   const currentFocusWeek = getFocusWeek();
   const stats = getAdminStats();
-  const allTransactions = getTransactions().slice(-8).reverse();
-  const allUsers = getUsers().filter(u => u.role === "USER");
-  const topUsers = [...allUsers].sort((a, b) => b.total_credits - a.total_credits).slice(0, 5);
 
   const handleSearch = () => {
     const results = searchUsers(searchQuery);
@@ -157,7 +152,6 @@ const AdminDashboard = () => {
         <Tabs defaultValue="kiosk" className="space-y-4">
           <TabsList>
             <TabsTrigger value="kiosk" className="gap-1"><CheckCircle className="h-4 w-4" /> Kiosk</TabsTrigger>
-            <TabsTrigger value="overview" className="gap-1"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
             <TabsTrigger value="focus" className="gap-1"><Zap className="h-4 w-4" /> Focus Week</TabsTrigger>
           </TabsList>
 
@@ -292,75 +286,7 @@ const AdminDashboard = () => {
             )}
           </TabsContent>
 
-          {/* ── Overview Tab ── */}
-          <TabsContent value="overview" className="space-y-6">
-            {/* Top users */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary" /> Top Users</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {topUsers.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4">No users yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {topUsers.map((u, i) => (
-                      <div key={u.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                          i === 0 ? "bg-accent/20 text-accent" : "bg-secondary text-secondary-foreground"
-                        }`}>{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-foreground truncate">{u.full_name} <span className="text-muted-foreground">@{u.username}</span></p>
-                          <p className="text-xs text-muted-foreground">{u.email}</p>
-                        </div>
-                        <span className="font-bold text-primary">{u.total_credits} cr</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
 
-            {/* Recent platform activity */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-primary" /> Recent Activity</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {allTransactions.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4">No activity yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {allTransactions.map((t) => {
-                      const txUser = allUsers.find(u => u.id === t.user_id);
-                      return (
-                        <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                            t.type === "EARNED" ? "bg-primary/10 text-primary" :
-                            t.type === "BONUS" ? "bg-accent/10 text-accent" :
-                            "bg-destructive/10 text-destructive"
-                          }`}>
-                            {t.type === "EARNED" ? <TrendingUp className="h-4 w-4" /> :
-                             t.type === "BONUS" ? <Coins className="h-4 w-4" /> :
-                             <Coins className="h-4 w-4" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">
-                              {txUser ? `@${txUser.username}` : "User"} — {t.description}
-                            </p>
-                            <p className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleDateString()}</p>
-                          </div>
-                          <span className={`text-sm font-bold ${t.amount > 0 ? "text-primary" : "text-destructive"}`}>
-                            {t.amount > 0 ? "+" : ""}{t.amount}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
 
           {/* ── Focus Week Tab ── */}
           <TabsContent value="focus">
