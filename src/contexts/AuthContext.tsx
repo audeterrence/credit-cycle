@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { getCurrentUser, setCurrentUser, loginUser, registerUser, type User } from "@/lib/store";
+import { getCurrentUser, setCurrentUser, loginUser, registerUser, seedDemoData, type User } from "@/lib/store";
 
 interface AuthContextType {
   user: User | null;
@@ -16,14 +16,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((email: string, password: string) => {
     const u = loginUser(email, password);
-    setCurrentUser(u);
-    setUser(u);
+    seedDemoData(u.id);
+    const fresh = getCurrentUser() ?? u;
+    setCurrentUser(fresh);
+    setUser(fresh);
   }, []);
 
   const signup = useCallback((data: { full_name: string; email: string; password: string; phone_number: string }) => {
     const u = registerUser(data);
-    setCurrentUser(u);
-    setUser(u);
+    seedDemoData(u.id);
+    const fresh = getCurrentUser() ?? u;
+    setCurrentUser(fresh);
+    setUser(fresh);
   }, []);
 
   const logout = useCallback(() => {
