@@ -2,6 +2,7 @@
 
 export interface User {
   id: string;
+  username: string;
   full_name: string;
   email: string;
   password_hash: string;
@@ -112,11 +113,13 @@ export function getUsers(): User[] {
   return getStore<User[]>("credi_users", []);
 }
 
-export function registerUser(data: { full_name: string; email: string; password: string; phone_number: string }): User {
+export function registerUser(data: { username: string; full_name: string; email: string; password: string; phone_number: string }): User {
   const users = getUsers();
   if (users.find((u) => u.email === data.email)) throw new Error("Email already registered");
+  if (users.find((u) => u.username.toLowerCase() === data.username.toLowerCase())) throw new Error("Username already taken");
   const user: User = {
     id: uuid(),
+    username: data.username,
     full_name: data.full_name,
     email: data.email,
     password_hash: simpleHash(data.password),
@@ -128,6 +131,74 @@ export function registerUser(data: { full_name: string; email: string; password:
   users.push(user);
   setStore("credi_users", users);
   return user;
+}
+
+// Search users by username or email
+export function searchUsers(query: string): User[] {
+  if (!query.trim()) return [];
+  const q = query.toLowerCase();
+  return getUsers().filter(
+    (u) => u.role === "USER" && (u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+  );
+}
+
+// Kiosk: submit waste and instantly award credits
+export function submitAndApproveWaste(userId: string, materialId: string, quantityUnits: number, weightKg: number | null): WasteSubmission {
+  const mat = MATERIALS.find((m) => m.id === materialId);
+  if (!mat) throw new Error("Material not found");
+  if (quantityUnits <= 0) throw new Error("Quantity must be positive");
+
+  // Calculate credits
+  let credits = quantityUnits * mat.base_credit_per_unit;
+  if (weightKg && weightKg > 0) {
+    const kgCredits = weightKg * mat.base_credit_per_kg;
+    credits = Math.max(credits, kgCredits);
+  }
+  credits = Math.round(credits);
+
+  // Apply focus week multiplier
+  const focusWeek = getFocusWeek();
+  if (focusWeek && focusWeek.material_id === materialId) {
+    credits = Math.round(credits * focusWeek.multiplier);
+  }
+
+  const submission: WasteSubmission = {
+    id: uuid(),
+    user_id: userId,
+    material_id: materialId,
+    quantity_units: quantityUnits,
+    weight_kg: weightKg,
+    credits_awarded: credits,
+    status: "APPROVED",
+    created_at: new Date().toISOString(),
+  };
+
+  // Save submission
+  const subs = getSubmissions();
+  subs.push(submission);
+  setStore("credi_submissions", subs);
+
+  // Award credits to user
+  const users = getUsers();
+  const userIdx = users.findIndex((u) => u.id === userId);
+  if (userIdx !== -1) {
+    users[userIdx].total_credits += credits;
+    setStore("credi_users", users);
+  }
+
+  // Record transaction
+  const txns = getTransactions();
+  txns.push({
+    id: uuid(),
+    user_id: userId,
+    amount: credits,
+    type: "EARNED",
+    description: `${quantityUnits} ${mat.name}${focusWeek && focusWeek.material_id === materialId ? " (Focus ×" + focusWeek.multiplier + ")" : ""}`,
+    created_at: new Date().toISOString(),
+  });
+  setStore("credi_transactions", txns);
+
+  return submission;
 }
 
 export function loginUser(email: string, password: string): User {
@@ -328,7 +399,8 @@ export function ensureAdminExists() {
   if (!users.some((u) => u.email === "admin@credican.cm")) {
     const admin: User = {
       id: uuid(),
-      full_name: "Admin",
+      username: "admin",
+      full_name: "Kiosk Manager",
       email: "admin@credican.cm",
       password_hash: simpleHash("admin123"),
       phone_number: "+237600000000",
