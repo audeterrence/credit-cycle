@@ -201,10 +201,11 @@ export function submitAndApproveWaste(userId: string, materialId: string, quanti
   return submission;
 }
 
-export function loginUser(email: string, password: string): User {
+export function loginUser(identifier: string, password: string): User {
   const users = getUsers();
-  const user = users.find((u) => u.email === email && u.password_hash === simpleHash(password));
-  if (!user) throw new Error("Invalid email or password");
+  const hash = simpleHash(password);
+  const user = users.find((u) => (u.email === identifier || u.username === identifier) && u.password_hash === hash);
+  if (!user) throw new Error("Invalid username/email or password");
   return user;
 }
 
