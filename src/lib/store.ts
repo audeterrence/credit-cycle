@@ -429,18 +429,18 @@ export function seedDemoData(userId: string) {
     { id: uuid(), user_id: userId, material_id: "mat-metal", quantity_units: 5, weight_kg: 2.5, credits_awarded: 25, status: "APPROVED", created_at: new Date(now - 5 * day).toISOString() },
     { id: uuid(), user_id: userId, material_id: "mat-cans", quantity_units: 20, weight_kg: 1.0, credits_awarded: 60, status: "APPROVED", created_at: new Date(now - 4 * day).toISOString() },
     { id: uuid(), user_id: userId, material_id: "mat-glass", quantity_units: 8, weight_kg: 3.2, credits_awarded: 32, status: "APPROVED", created_at: new Date(now - 3 * day).toISOString() },
-    { id: uuid(), user_id: userId, material_id: "mat-plastic", quantity_units: 6, weight_kg: 0.3, credits_awarded: 12, status: "PENDING", created_at: new Date(now - 1 * day).toISOString() },
-    { id: uuid(), user_id: userId, material_id: "mat-cans", quantity_units: 10, weight_kg: null, credits_awarded: 30, status: "REJECTED", created_at: new Date(now - 2 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-plastic", quantity_units: 6, weight_kg: 0.3, credits_awarded: 12, status: "APPROVED", created_at: new Date(now - 1 * day).toISOString() },
+    { id: uuid(), user_id: userId, material_id: "mat-cans", quantity_units: 10, weight_kg: null, credits_awarded: 30, status: "APPROVED", created_at: new Date(now - 2 * day).toISOString() },
   ];
 
-  const approvedCredits = demoSubmissions.filter((s) => s.status === "APPROVED").reduce((a, s) => a + s.credits_awarded, 0);
+  const approvedCredits = demoSubmissions.reduce((a, s) => a + s.credits_awarded, 0);
 
   // Save submissions
   setStore("credi_submissions", [...subs, ...demoSubmissions]);
 
   // Save transactions
   const txns = getTransactions();
-  demoSubmissions.filter((s) => s.status === "APPROVED").forEach((s) => {
+  demoSubmissions.forEach((s) => {
     const mat = MATERIALS.find((m) => m.id === s.material_id);
     txns.push({ id: uuid(), user_id: userId, amount: s.credits_awarded, type: "EARNED", description: `Recycled ${s.quantity_units} ${mat?.name ?? "items"}`, created_at: s.created_at });
   });
