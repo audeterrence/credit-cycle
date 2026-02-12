@@ -3,7 +3,7 @@ import { getCurrentUser, setCurrentUser, loginUser, registerUser, seedDemoData, 
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => void;
+  login: (email: string, password: string) => User;
   signup: (data: { full_name: string; email: string; password: string; phone_number: string }) => void;
   logout: () => void;
   refresh: () => void;
@@ -14,12 +14,13 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => getCurrentUser());
 
-  const login = useCallback((email: string, password: string) => {
+  const login = useCallback((email: string, password: string): User => {
     const u = loginUser(email, password);
     seedDemoData(u.id);
     const fresh = getCurrentUser() ?? u;
     setCurrentUser(fresh);
     setUser(fresh);
+    return fresh;
   }, []);
 
   const signup = useCallback((data: { full_name: string; email: string; password: string; phone_number: string }) => {
