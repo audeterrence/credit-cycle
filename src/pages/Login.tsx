@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
@@ -22,56 +22,50 @@ const Login = () => {
     setIsLoading(true);
     setError(null);
 
-    console.log("--- Login Attempt Started ---");
-
     try {
-      // STEP 1: Search for the real email in the profiles table
-      console.log("Step 1: Looking up email for username:", username);
-      
+      // 1. LOOKUP: Fetch email and role via username
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('email')
+        .select('email, role')
         .eq('username', username.toLowerCase().trim())
         .single();
 
       if (profileError || !profile) {
-        console.error("Step 1 Failed: Profile lookup error", profileError);
         throw new Error("Username not found.");
       }
 
-      console.log("Step 1 Success: Found email:", profile.email);
-
-      // STEP 2: Sign in with the email we just found and the PIN
-      console.log("Step 2: Authenticating with Supabase Auth...");
-      
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
+      // 2. AUTHENTICATION: Sign in with the fetched email and PIN
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: profile.email,
         password: pin,
       });
 
-      if (authError) {
-        console.error("Step 2 Failed: Auth error", authError.message);
-        throw authError;
+      if (authError) throw authError;
+
+      if (authData.user) {
+        // 3. ROLE-BASED REDIRECTION
+        const userRole = profile.role;
+
+        if (userRole === 'super_admin') {
+          navigate("/admin-dashboard");
+        } else if (userRole === 'kiosk_admin') {
+          navigate("/kiosk-dashboard");
+        } else {
+          navigate("/dashboard");
+        }
       }
-
-      console.log("Step 2 Success: User logged in!", data.user);
-      
-      // Navigate to the dashboard
-      navigate("/dashboard");
-
     } catch (err: any) {
-      console.error("Final Error State:", err);
+      console.error("Login error:", err.message);
       
       if (err.message === "Username not found.") {
-        setError("This username is not registered.");
-      } else if (err.message.includes("Invalid login credentials") || err.status === 400) {
-        setError("Invalid security PIN. Please try again.");
+        setError("This username does not exist.");
+      } else if (err.message.includes("Invalid login credentials")) {
+        setError("Incorrect security PIN. Please try again.");
       } else {
-        setError(err.message || "An error occurred. Check your connection.");
+        setError("An error occurred during login.");
       }
     } finally {
       setIsLoading(false);
-      console.log("--- Login Attempt Finished ---");
     }
   };
 
@@ -85,34 +79,48 @@ const Login = () => {
           {/* Left Panel */}
           <div className="hidden lg:flex lg:col-span-5 flex-col justify-between p-12 bg-slate-900 text-white relative">
             <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?q=80&w=1000')] opacity-5 bg-cover mix-blend-overlay"></div>
+            
             <div className="relative z-10 space-y-8">
               <h1 className="text-4xl xl:text-5xl font-black leading-tight">Welcome <br />Back.</h1>
-              <p className="text-slate-400 text-lg">Log in to manage your recycling wallet and impact.</p>
-              <div className="flex items-center gap-4 bg-white/5 p-5 rounded-2xl border border-white/10">
-                <ShieldCheck className="h-7 w-7 text-primary" />
-                <div>
-                  <p className="text-sm font-bold">Secure Access</p>
-                  <p className="text-xs text-slate-500">Credi-Can uses end-to-end encryption.</p>
+              <p className="text-slate-400 text-lg leading-relaxed">
+                Log in to manage your credits, track your impact, and access your rewards.
+              </p>
+              
+              <div className="pt-6">
+                <div className="flex items-center gap-4 bg-white/5 p-5 rounded-2xl border border-white/10 backdrop-blur-sm">
+                  <div className="h-12 w-12 rounded-xl bg-primary/20 flex items-center justify-center">
+                    <ShieldCheck className="h-7 w-7 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Secure Access</p>
+                    <p className="text-xs text-slate-500">Your data is protected by end-to-end encryption.</p>
+                  </div>
                 </div>
               </div>
             </div>
+
+            <p className="relative z-10 text-[10px] font-black uppercase tracking-[0.3em] text-slate-600">
+              Credi-Can © 2026
+            </p>
           </div>
 
           {/* Right Panel: Form */}
           <div className="lg:col-span-7 p-8 md:p-16 xl:p-20 flex items-center">
             <div className="max-w-sm w-full mx-auto space-y-10">
+              
               <div className="space-y-2">
-                <h2 className="text-3xl font-black text-slate-900 tracking-tight">Log In</h2>
-                <p className="text-slate-500 font-medium">Enter your credentials below.</p>
+                <h2 className="text-3xl font-black text-slate-900 tracking-tight">Login</h2>
+                <p className="text-slate-500 font-medium">Please enter your credentials below.</p>
               </div>
 
               {error && (
-                <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100">
+                <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 animate-in fade-in zoom-in-95">
                   {error}
                 </div>
               )}
 
               <form className="space-y-6" onSubmit={handleLogin}>
+                
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Username</Label>
                   <div className="relative">
@@ -120,8 +128,8 @@ const Login = () => {
                     <Input 
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="Username" 
-                      className="pl-12 h-14 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-primary/20" 
+                      placeholder="e.g., mbassa_terrence" 
+                      className="pl-12 h-14 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-primary/20 font-medium" 
                       required 
                     />
                   </div>
@@ -142,14 +150,29 @@ const Login = () => {
                   </div>
                 </div>
 
-                <Button disabled={isLoading} type="submit" className="w-full h-14 rounded-2xl font-bold">
-                  {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : "Access Account"}
+                <Button 
+                  disabled={isLoading}
+                  type="submit" 
+                  className="w-full h-14 rounded-2xl font-bold shadow-xl shadow-primary/20 transition-all active:scale-95"
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>Access Account <LogIn className="ml-2 h-5 w-5" /></>
+                  )}
                 </Button>
+
               </form>
 
-              <p className="text-sm text-slate-500 font-medium text-center">
-                New to Credi-Can? <a href="/signup" className="text-primary font-bold">Create an account</a>
-              </p>
+              <div className="pt-6 border-t border-slate-100">
+                <p className="text-sm text-slate-500 font-medium text-center">
+                  New to Credi-Can?{" "}
+                  <Link to="/signup" className="text-primary font-bold hover:underline underline-offset-4">
+                    Create an account
+                  </Link>
+                </p>
+              </div>
+
             </div>
           </div>
         </div>
