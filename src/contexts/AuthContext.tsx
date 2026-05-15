@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           full_name: data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim() || 'User',
           email: data.email || email,
           phone_number: data.phone_number || '',
-          role: (data.role as UserRole) || 'user',
+          role: (data.role?.toLowerCase() as UserRole) || 'user',
           total_credits: data.credits ?? data.total_credits ?? 0,
           created_at: data.created_at || createdAt,
         });

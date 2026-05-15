@@ -1,400 +1,496 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabaseClient";
 import {
   Recycle, LogOut, Search, UserPlus, Package, CheckCircle, Users, Coins,
-  BarChart3, User as UserIcon, Phone, Mail, Calendar,
+  BarChart3, User as UserIcon, Phone, Mail, Calendar, Sparkles, AlertCircle, 
+  Trash2, ShieldCheck, MapPin, Key, Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  searchUsers, registerUser, submitAndApproveWaste,
-  getFocusWeek, MATERIALS, getUsers, getUserSubmissions,
-  getAllSubmissions, type User,
-} from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
 
-const AdminDashboard = () => {
+// Static reference matrix mapped directly to platform standards
+const MATERIALS = [
+  { id: "mat-plastic", name: "Plastic Bottles", bin_color: "Yellow", base_unit: 2, base_kg: 20 },
+  { id: "mat-metal", name: "Metal Scraps", bin_color: "Red", base_unit: 5, base_kg: 40 },
+  { id: "mat-cans", name: "Aluminum Cans", bin_color: "Orange", base_unit: 3, base_kg: 30 },
+  { id: "mat-glass", name: "Glass Containers", bin_color: "Green", base_unit: 4, base_kg: 25 },
+];
+
+export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [tick, setTick] = useState(0);
 
-  // User Lookup state hooks
+  // Dashboard transactional logs array
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<User[]>([]);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
-  // Registration states
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  // Form Creation State Matrix - Explicitly matches relational table requirements
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newLastName, setNewLastName] = useState("");
   const [newUsername, setNewUsername] = useState("");
-  const [newFullName, setNewFullName] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  const [newPhone, setNewPhone] = useState("");
+  const [newCity, setNewCity] = useState("Douala");
+  const [newPhone, setNewPhone] = useState("+237 "); // Enforces regional code pre-fill
+  const [newPin, setNewPin] = useState(""); 
+  const [assignedRole, setAssignedRole] = useState<"user" | "kiosk_admin" | "super_admin">("user");
+  const [isProvisioning, setIsProvisioning] = useState(false);
 
-  // Input Collection states
+  // Waste logging elements state
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [weight, setWeight] = useState("");
+  const [isSubmittingWaste, setIsSubmittingWaste] = useState(false);
 
-  // REDIRECT HOOK PURGED: Gateway route interceptors manage authorization access safely
+  // Global Promotional Yield Modifiers state
+  const [activeCampaign, setActiveCampaign] = useState<{ material_id: string; multiplier: number; label: string } | null>(null);
+  const [fwMaterialId, setFwMaterialId] = useState("");
+  const [fwMultiplier, setFwMultiplier] = useState("1.5");
+
   if (!user) return null;
 
-  const currentFocusWeek = getFocusWeek();
+  // Retrieve active transaction records directly from live database instances
+  const fetchGlobalSubmissions = async () => {
+    const { data, error } = await supabase
+      .from("waste_submissions")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data) setSubmissions(data);
+  };
 
-  // Metrics extraction logic
-  const allSubs = getAllSubmissions() || [];
-  const todaySubs = allSubs.filter(s => new Date(s.created_at).toDateString() === new Date().toDateString());
-  const todayCredits = todaySubs.reduce((a, s) => a + s.credits_awarded, 0);
-  const todayUsers = new Set(todaySubs.map(s => s.user_id)).size;
-  const totalSubs = allSubs.length;
-  const totalCredits = allSubs.reduce((a, s) => a + s.credits_awarded, 0);
+  useEffect(() => {
+    fetchGlobalSubmissions();
+  }, []);
+
+  // Live Metric Telemetry calculations
+  const todayStr = new Date().toDateString();
+  const todaySubs = submissions.filter(s => new Date(s.created_at).toDateString() === todayStr);
+  const todayCredits = todaySubs.reduce((acc, s) => acc + (s.credits_awarded || 0), 0);
+  const todayUsersCount = new Set(todaySubs.map(s => s.user_id)).size;
 
   const materialBreakdown = MATERIALS.map(m => {
-    const subs = allSubs.filter(s => s.material_id === m.id);
+    const matched = submissions.filter(s => s.material_id === m.id);
     return {
       material: m,
-      count: subs.length,
-      units: subs.reduce((a, s) => a + s.quantity_units, 0),
-      credits: subs.reduce((a, s) => a + s.credits_awarded, 0),
+      count: matched.length,
+      units: matched.reduce((acc, s) => acc + (s.quantity_units || 0), 0),
+      credits: matched.reduce((acc, s) => acc + (s.credits_awarded || 0), 0),
     };
   });
 
-  const handleSearch = () => {
-    const results = searchUsers(searchQuery);
-    setSearchResults(results);
-    if (results.length === 0 && searchQuery.trim()) {
-      toast({ title: "No user found", description: "You can create a new account below." });
-      setShowCreateForm(true);
-    } else {
-      setShowCreateForm(false);
+  const handleSearchUsers = async () => {
+    if (!searchQuery.trim()) return;
+    const query = searchQuery.toLowerCase().trim();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .or(`username.ilike.%${query}%,email.ilike.%${query}%`);
+
+    if (!error && data) {
+      setSearchResults(data);
+      if (data.length === 0) {
+        toast({ title: "Account Not Found", description: "Use the advanced identity form below to onboard this profile." });
+      }
     }
   };
 
-  const handleSelectUser = (u: User) => {
-    const freshUsers = getUsers();
-    const fresh = freshUsers.find((x) => x.id === u.id) ?? u;
-    setSelectedUser(fresh);
-    setSearchResults([]);
-    setSearchQuery("");
-    setShowCreateForm(false);
-  };
+  const handleCommitUserCreation = async () => {
+    if (!newFirstName || !newLastName || !newUsername || !newEmail || !newPin) {
+      toast({ variant: "destructive", title: "Incomplete Attributes", description: "All registration fields must be populated." });
+      return;
+    }
 
-  const handleCreateUser = () => {
+    setIsProvisioning(true);
     try {
-      const newUser = registerUser({
-        username: newUsername, full_name: newFullName, email: newEmail,
-        password: "changeme123", phone_number: newPhone,
+      const formattedPhone = newPhone.trim();
+      const compiledFullName = `${newFirstName.trim()} ${newLastName.trim()}`;
+
+      // Call database transaction query endpoint using RPC mapping formats
+      const { data: newUserId, error } = await supabase.rpc("create_user_v2", {
+        p_email: newEmail.trim().toLowerCase(),
+        p_password: newPin,
+        p_username: newUsername.trim().toLowerCase(),
+        p_first_name: newFirstName.trim(),
+        p_last_name: newLastName.trim(),
+        p_phone_number: formattedPhone,
+        p_city: newCity,
+        p_role: assignedRole
       });
-      setSelectedUser(newUser);
-      setShowCreateForm(false);
-      setNewUsername(""); setNewFullName(""); setNewEmail(""); setNewPhone("");
-      toast({ title: "Account created!", description: `${newUser.full_name} (@${newUser.username}) — Default password: changeme123` });
+
+      if (error) throw error;
+
+      toast({
+        title: "Database Entry Saved",
+        description: `Successfully generated ${compiledFullName} profile mapped as clearance group [${assignedRole}].`
+      });
+
+      // Safely flush forms and restore original local regional placeholder strings
+      setNewFirstName(""); setNewLastName(""); setNewUsername("");
+      setNewEmail(""); setNewPhone("+237 "); setNewPin("");
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Error", description: err.message });
+      toast({ variant: "destructive", title: "Provisioning Aborted", description: err.message });
+    } finally {
+      setIsProvisioning(false);
     }
   };
 
-  const handleSubmitWaste = () => {
+  const handleLogIntakeDeposit = async () => {
     if (!selectedUser || !materialId || !quantity) return;
+    setIsSubmittingWaste(true);
+
     try {
-      const sub = submitAndApproveWaste(selectedUser.id, materialId, Number(quantity), weight ? Number(weight) : null);
-      const freshUsers = getUsers();
-      const fresh = freshUsers.find((x) => x.id === selectedUser.id);
-      if (fresh) setSelectedUser(fresh);
+      const selectedMat = MATERIALS.find(m => m.id === materialId);
+      if (!selectedMat) return;
+
+      // Point scaling formula metrics configuration rules
+      let baseYield = Number(quantity) * selectedMat.base_unit;
+      if (weight && Number(weight) > 0) {
+        const kgYield = Number(weight) * selectedMat.base_kg;
+        baseYield = Math.max(baseYield, kgYield);
+      }
+
+      // Check if a global yield campaign is active for this target stream
+      if (activeCampaign && activeCampaign.material_id === materialId) {
+        baseYield = baseYield * activeCampaign.multiplier;
+      }
+
+      const finalCreditsCalculated = Math.round(baseYield);
+
+      // 1. Log transaction into live audit tracking tables
+      const { error: subError } = await supabase.from("waste_submissions").insert({
+        user_id: selectedUser.id,
+        material_id: materialId,
+        quantity_units: Number(quantity),
+        weight_kg: weight ? Number(weight) : null,
+        credits_awarded: finalCreditsCalculated,
+        status: "APPROVED"
+      });
+
+      if (subError) throw subError;
+
+      // 2. Clear input entries and sync state logs smoothly
       setMaterialId(""); setQuantity(""); setWeight("");
-      setTick((t) => t + 1);
-      toast({ title: "Credits awarded!", description: `${sub.credits_awarded} credits added to @${selectedUser.username}` });
+      await fetchGlobalSubmissions();
+
+      // Instantly increment point metrics visually on current focused account item state container
+      setSelectedUser((prev: any) => prev ? { ...prev, total_credits: (prev.total_credits || 0) + finalCreditsCalculated } : null);
+
+      toast({ title: "Transaction Dispatched", description: `${finalCreditsCalculated} points added to account wallet @${selectedUser.username}` });
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Error", description: err.message });
+      toast({ variant: "destructive", title: "Ledger Update Failed", description: err.message });
+    } finally {
+      setIsSubmittingWaste(false);
     }
   };
-
-  const handleLogout = async () => {
-    await logout();
-    navigate("/");
-  };
-
-  const userHistory = selectedUser ? getUserSubmissions(selectedUser.id).slice(-5).reverse() : [];
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-md">
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 backdrop-blur-md">
         <div className="container flex h-16 items-center justify-between">
-          <a href="/" className="flex items-center gap-2 font-display text-xl font-bold text-primary">
-            <Recycle className="h-7 w-7" />
-            Credi-Can
-            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-              {user.role === "super_admin" ? "Super Admin" : "Kiosk Admin"}
+          <div className="flex items-center gap-2 font-display text-xl font-bold text-slate-900">
+            <div className="bg-primary p-1.5 rounded-xl text-white"><Recycle className="h-5 w-5" /></div>
+            <span>Credi-Can Central Workspace</span>
+            <span className={`ml-2 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+              user.role === "super_admin" ? "bg-purple-100 text-purple-700 border border-purple-200" : "bg-orange-100 text-orange-700 border border-orange-200"
+            }`}>
+              {user.role === "super_admin" ? "Super Admin Account" : "Kiosk Handler Mode"}
             </span>
-          </a>
+          </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-muted-foreground">{user.full_name}</span>
-            <Button variant="ghost" size="icon" onClick={handleLogout}><LogOut className="h-5 w-5" /></Button>
+            <span className="text-sm font-semibold text-slate-700">{user.full_name}</span>
+            <Button variant="ghost" size="icon" onClick={logout} className="hover:bg-slate-100 rounded-xl"><LogOut className="h-5 w-5 text-slate-500" /></Button>
           </div>
         </div>
       </header>
 
-      <main className="container max-w-5xl py-8 space-y-6">
-        {/* Quick metrics bar */}
+      <main className="container max-w-6xl py-8 space-y-6">
+        {/* Real-time Telemetry Analytics Units */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={<CheckCircle className="h-5 w-5 text-primary" />} label="Today's Submissions" value={todaySubs.length} />
-          <StatCard icon={<Coins className="h-5 w-5 text-accent" />} label="Today's Credits" value={todayCredits} />
-          <StatCard icon={<Users className="h-5 w-5 text-primary" />} label="Users Served Today" value={todayUsers} />
-          <StatCard icon={<Package className="h-5 w-5 text-primary" />} label="All-Time Submissions" value={totalSubs} />
+          <StatCard icon={<CheckCircle className="h-5 w-5 text-emerald-600" />} label="Today's Material Influx" value={todaySubs.length} />
+          <StatCard icon={<Coins className="h-5 w-5 text-amber-600" />} label="Today's Distributed Tokens" value={todayCredits} />
+          <StatCard icon={<Users className="h-5 w-5 text-blue-600" />} label="Active Handled Recyclers" value={todayUsersCount} />
+          <StatCard icon={<Package className="h-5 w-5 text-indigo-600" />} label="System Lifetime Submissions" value={submissions.length} />
         </div>
 
-        {/* Focus Week Event Active handler */}
-        {currentFocusWeek && (
-          <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/10 p-3">
-            <span className="text-lg">⚡</span>
-            <div>
-              <p className="text-sm font-semibold text-foreground">Focus Week Active: {currentFocusWeek.label} — ×{currentFocusWeek.multiplier} credits</p>
-              <p className="text-xs text-muted-foreground">Since {new Date(currentFocusWeek.started_at).toLocaleDateString()}</p>
+        {/* Global Promotional Surge Yield Banner */}
+        {activeCampaign && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm backdrop-blur-sm animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">⚡</span>
+              <div>
+                <p className="text-sm font-bold text-amber-900">Dynamic Multiplier Yield Engine Running Globally</p>
+                <p className="text-xs text-amber-700">{activeCampaign.label} items are scaling points directly at <span className="font-bold">×{activeCampaign.multiplier} values</span>.</p>
+              </div>
             </div>
+            {user.role === "super_admin" && (
+              <Button variant="ghost" size="sm" onClick={() => setActiveCampaign(null)} className="text-amber-800 hover:text-red-600 hover:bg-amber-100/50 font-bold gap-1.5 rounded-lg">
+                <Trash2 className="h-3.5 w-3.5" /> Terminate Campaign
+              </Button>
+            )}
           </div>
         )}
 
         <Tabs defaultValue="kiosk" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="kiosk" className="gap-1"><CheckCircle className="h-4 w-4" /> Kiosk</TabsTrigger>
-            <TabsTrigger value="reports" className="gap-1"><BarChart3 className="h-4 w-4" /> Reports</TabsTrigger>
-            <TabsTrigger value="profile" className="gap-1"><UserIcon className="h-4 w-4" /> Profile</TabsTrigger>
+          <TabsList className="bg-slate-200/60 p-1 rounded-xl border border-slate-200/40">
+            <TabsTrigger value="kiosk" className="gap-1.5 rounded-lg font-bold">Kiosk Terminal</TabsTrigger>
+            <TabsTrigger value="reports" className="gap-1.5 rounded-lg font-bold">Performance Matrix</TabsTrigger>
+            {user.role === "super_admin" && <TabsTrigger value="provisioning" className="gap-1.5 rounded-lg font-bold text-purple-700 data-[state=active]:text-purple-900">User & Personnel Control</TabsTrigger>}
+            <TabsTrigger value="profile" className="gap-1.5 rounded-lg font-bold">Terminal Identity</TabsTrigger>
           </TabsList>
 
-          {/* Kiosk Operations Panel */}
-          <TabsContent value="kiosk" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Search className="h-5 w-5 text-primary" /> Step 1 — Find User
-                </CardTitle>
-                <CardDescription>Search by username or email. If no account exists, create one.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Username or email…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                  />
-                  <Button onClick={handleSearch}><Search className="mr-1 h-4 w-4" /> Search</Button>
-                </div>
-
-                {searchResults.length > 0 && (
-                  <div className="space-y-2">
-                    {searchResults.map((u) => (
-                      <button key={u.id} onClick={() => handleSelectUser(u)}
-                        className="flex w-full items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition hover:bg-secondary">
-                        <Users className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <p className="font-medium text-foreground">{u.full_name} <span className="text-muted-foreground">@{u.username}</span></p>
-                          <p className="text-xs text-muted-foreground">{u.email} · {u.total_credits} credits</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {showCreateForm && (
-                  <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4 space-y-3">
-                    <p className="flex items-center gap-2 text-sm font-semibold text-foreground"><UserPlus className="h-4 w-4 text-primary" /> Create New Account</p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div><Label>Username</Label><Input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="johndoe" /></div>
-                      <div><Label>Full Name</Label><Input value={newFullName} onChange={(e) => setNewFullName(e.target.value)} placeholder="John Doe" /></div>
-                      <div><Label>Email</Label><Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="user@example.com" /></div>
-                      <div><Label>Phone</Label><Input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="+237 6XX XXX XXX" /></div>
+          {/* KIOSK TRANSACTION PANEL */}
+          <TabsContent value="kiosk" className="space-y-6 animate-in fade-in duration-150">
+            <div className="grid gap-6 md:grid-cols-12 items-start">
+              <div className="md:col-span-7 space-y-6">
+                <Card className="border-slate-200 shadow-sm bg-white rounded-2xl">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Search className="h-4 w-4 text-primary" /> Recycler Identity Verification</CardTitle>
+                    <CardDescription>Search by registered username handle strings.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Search profile identifiers..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSearchUsers()}
+                        className="bg-slate-50 border-slate-200 h-11 focus-visible:ring-primary/20 rounded-xl"
+                      />
+                      <Button onClick={handleSearchUsers} className="h-11 px-5 font-bold rounded-xl">Search Index</Button>
                     </div>
-                    <Button onClick={handleCreateUser} disabled={!newUsername || !newFullName || !newEmail}>
-                      <UserPlus className="mr-1 h-4 w-4" /> Create Account
-                    </Button>
-                  </div>
-                )}
+
+                    {searchResults.length > 0 && (
+                      <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white max-h-48 overflow-y-auto shadow-inner">
+                        {searchResults.map((u) => (
+                          <button key={u.id} onClick={() => { setSelectedUser(u); setSearchResults([]); setSearchQuery(""); }} className="flex w-full items-center justify-between p-4 text-left hover:bg-slate-50 transition-colors">
+                            <div>
+                              <p className="font-bold text-slate-800">{u.first_name} {u.last_name} <span className="text-slate-400 font-normal">@{u.username}</span></p>
+                              <p className="text-xs text-slate-500">{u.email} · Location: {u.city || "Douala"}</p>
+                            </div>
+                            <span className="text-xs font-black text-primary bg-primary/5 px-2.5 py-1 rounded-full">{u.total_credits || 0} cr</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {selectedUser && (
+                      <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-4 animate-in fade-in">
+                        <div>
+                          <span className="text-[9px] font-black uppercase tracking-wider text-primary/70">Selected Wallet Target</span>
+                          <p className="text-base font-black text-slate-900">{selectedUser.first_name} {selectedUser.last_name} <span className="text-slate-500 font-normal text-sm">@{selectedUser.username}</span></p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setSelectedUser(null)} className="border-slate-200 bg-white font-bold rounded-lg shadow-sm">Reset</Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 {selectedUser && (
-                  <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 p-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Selected User</p>
-                      <p className="text-lg font-bold text-foreground">{selectedUser.full_name} <span className="text-muted-foreground font-normal">@{selectedUser.username}</span></p>
-                      <p className="text-sm text-primary font-semibold">{selectedUser.total_credits} credits</p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setSelectedUser(null)}>Change</Button>
-                  </div>
+                  <Card className="border-slate-200 shadow-sm bg-white rounded-2xl animate-in slide-in-from-bottom-2 duration-200">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Package className="h-4 w-4 text-primary" /> Input Material Intake Measurements</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        <div>
+                          <Label className="text-xs font-bold text-slate-500">Material Variant</Label>
+                          <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-primary/20" value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
+                            <option value="">Select Stream...</option>
+                            {MATERIALS.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.bin_color})</option>)}
+                          </select>
+                        </div>
+                        <div><Label className="text-xs font-bold text-slate-500">Quantity (Units)</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 15" className="h-11 mt-1.5 rounded-xl bg-white" /></div>
+                        <div><Label className="text-xs font-bold text-slate-500">Mass (kg, Optional)</Label><Input type="number" min="0" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 2.5" className="h-11 mt-1.5 rounded-xl bg-white" /></div>
+                      </div>
+                      <Button onClick={handleLogIntakeDeposit} disabled={!materialId || !quantity || isSubmittingWaste} className="w-full h-11 font-bold rounded-xl shadow-md">
+                        {isSubmittingWaste ? "Processing Deposit Ledger..." : "Award Balance Credits Instantly"}
+                      </Button>
+                    </CardContent>
+                  </Card>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Waste Entry Module */}
-            {selectedUser && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Package className="h-5 w-5 text-primary" /> Step 2 — Log Waste & Award Credits
-                  </CardTitle>
-                  <CardDescription>
-                    Enter materials brought by {selectedUser.full_name}. Credits are awarded instantly.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div>
-                      <Label>Material</Label>
-                      <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
-                        <option value="">Select…</option>
-                        {MATERIALS.map((m) => (
-                          <option key={m.id} value={m.id}>{m.name} ({m.bin_color}){currentFocusWeek?.material_id === m.id ? " ⚡" : ""}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div><Label>Quantity (units)</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 10" /></div>
-                    <div><Label>Weight (kg, optional)</Label><Input type="number" min="0" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 1.5" /></div>
-                  </div>
-                  <Button onClick={handleSubmitWaste} disabled={!materialId || !quantity} className="w-full sm:w-auto">
-                    <CheckCircle className="mr-1 h-4 w-4" /> Submit & Award Credits
-                  </Button>
-
-                  {userHistory.length > 0 && (
-                    <div className="mt-4">
-                      <p className="mb-2 text-sm font-semibold text-muted-foreground">Recent for @{selectedUser.username}</p>
-                      <div className="overflow-x-auto rounded-lg border border-border">
-                        <table className="w-full text-sm">
-                          <thead className="bg-secondary text-secondary-foreground">
-                            <tr>
-                              <th className="px-3 py-2 text-left">Material</th>
-                              <th className="px-3 py-2 text-left">Qty</th>
-                              <th className="px-3 py-2 text-left">Credits</th>
-                              <th className="px-3 py-2 text-left">Date</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {userHistory.map((s) => {
-                              const mat = MATERIALS.find((m) => m.id === s.material_id);
-                              return (
-                                <tr key={s.id} className="border-t border-border">
-                                  <td className="px-3 py-2">{mat?.name ?? "Unknown"}</td>
-                                  <td className="px-3 py-2">{s.quantity_units}</td>
-                                  <td className="px-3 py-2 font-semibold text-primary">+{s.credits_awarded}</td>
-                                  <td className="px-3 py-2 text-muted-foreground">{new Date(s.created_at).toLocaleDateString()}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+              {/* LOCAL TERMINAL HISTORY LIST FEED */}
+              <div className="md:col-span-5 space-y-6">
+                <Card className="border-slate-200 shadow-sm bg-white rounded-2xl">
+                  <CardHeader><CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Activity className="h-4 w-4 text-primary" /> Operational Terminal Log Feed</CardTitle></CardHeader>
+                  <CardContent>
+                    {submissions.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-slate-50/50">No operational histories recorded today.</div>
+                    ) : (
+                      <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
+                        {submissions.slice(0, 6).map((s) => {
+                          const mat = MATERIALS.find(m => m.id === s.material_id);
+                          return (
+                            <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+                              <div>
+                                <p className="text-xs font-bold text-slate-800">{mat?.name || "Assorted Batch"}</p>
+                                <p className="text-[10px] text-slate-400 font-medium">{s.quantity_units} Items · {s.weight_kg ? `${s.weight_kg} kg` : "No Scale Metric"}</p>
+                              </div>
+                              <span className="text-xs font-black text-emerald-600">+{s.credits_awarded} cr</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
 
-          {/* Reports Analytics Module */}
-          <TabsContent value="reports" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-primary" /> Kiosk Performance</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
-                    <p className="text-2xl font-bold text-foreground">{totalSubs}</p>
-                    <p className="text-xs text-muted-foreground">Total Collections</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
-                    <p className="text-2xl font-bold text-primary">{totalCredits}</p>
-                    <p className="text-xs text-muted-foreground">Total Credits Awarded</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
-                    <p className="text-2xl font-bold text-foreground">{new Set(allSubs.map(s => s.user_id)).size}</p>
-                    <p className="text-xs text-muted-foreground">Unique Users Served</p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-3 text-sm font-semibold text-foreground">Material Breakdown</p>
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full text-sm">
-                      <thead className="bg-secondary text-secondary-foreground">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Material</th>
-                          <th className="px-4 py-2 text-left">Bin</th>
-                          <th className="px-4 py-2 text-right">Collections</th>
-                          <th className="px-4 py-2 text-right">Units</th>
-                          <th className="px-4 py-2 text-right">Credits</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {materialBreakdown.map((row) => (
-                          <tr key={row.material.id} className="border-t border-border">
-                            <td className="px-4 py-2 font-medium text-foreground">{row.material.name}</td>
-                            <td className="px-4 py-2 text-muted-foreground">{row.material.bin_color}</td>
-                            <td className="px-4 py-2 text-right">{row.count}</td>
-                            <td className="px-4 py-2 text-right">{row.units}</td>
-                            <td className="px-4 py-2 text-right font-semibold text-primary">{row.credits}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Profile Metadata panel view */}
-          <TabsContent value="profile">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><UserIcon className="h-5 w-5 text-primary" /> My Profile</CardTitle>
-              </CardHeader>
+          {/* PERFORMANCE BREAKDOWN MATRIX */}
+          <TabsContent value="reports" className="space-y-6 animate-in fade-in duration-150">
+            <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
+              <CardHeader><CardTitle className="text-base font-bold text-slate-900">Material Stream Performance Matrix</CardTitle></CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <UserIcon className="h-8 w-8" />
-                    </div>
-                    <div>
-                      <p className="text-xl font-bold text-foreground">{user.full_name}</p>
-                      <p className="text-sm text-muted-foreground">@{user.username} · Account Manager</p>
-                    </div>
-                  </div>
+                <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-white">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-900 text-white font-bold">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Material Stream</th>
+                        <th className="px-4 py-3 text-left">Bin Assignment</th>
+                        <th className="px-4 py-3 text-right">Total Operations</th>
+                        <th className="px-4 py-3 text-right">Collected Units</th>
+                        <th className="px-4 py-3 text-right">Distributed Tokens</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {materialBreakdown.map((row) => (
+                        <tr key={row.material.id} className="hover:bg-slate-50/50">
+                          <td className="px-4 py-3.5 font-bold text-slate-800">{row.material.name}</td>
+                          <td className="px-4 py-3.5 text-slate-500">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: row.material.bin_color === 'Orange' ? '#f97316' : row.material.bin_color === 'Yellow' ? '#eab308' : row.material.bin_color === 'Red' ? '#ef4444' : '#22c55e' }} />
+                              {row.material.bin_color}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-right font-semibold text-slate-600">{row.count}</td>
+                          <td className="px-4 py-3.5 text-right font-bold text-slate-900">{row.units} items</td>
+                          <td className="px-4 py-3.5 text-right font-black text-primary">+{row.credits} cr</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Email Address</p>
-                        <p className="text-sm font-medium text-foreground">{user.email}</p>
+          {/* ADVANCED DB ALIGNED IDENTITY PROVISIONING TAB */}
+          {user.role === "super_admin" && (
+            <TabsContent value="provisioning" className="space-y-6 animate-in slide-in-from-left-2 duration-150">
+              <div className="grid gap-6 md:grid-cols-12 items-start">
+                <div className="md:col-span-8 space-y-6">
+                  <Card className="border-purple-200 bg-white rounded-2xl shadow-sm border-2">
+                    <CardHeader className="bg-purple-50/40 border-b border-purple-100 rounded-t-2xl">
+                      <CardTitle className="text-base flex items-center gap-2 text-purple-900 font-black"><ShieldCheck className="h-4 w-4 text-purple-600" /> Database-Aligned Identity Provisioning Desk</CardTitle>
+                      <CardDescription className="text-purple-700/80">Onboard profiles structured strictly with your public schema variables.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pt-5 space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div><Label className="text-xs font-bold text-slate-600">First Name</Label><Input value={newFirstName} onChange={(e) => setNewFirstName(e.target.value)} placeholder="e.g. Terrence" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
+                        <div><Label className="text-xs font-bold text-slate-600">Last Name</Label><Input value={newLastName} onChange={(e) => setNewLastName(e.target.value)} placeholder="e.g. Mbassa" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Phone Connection</p>
-                        <p className="text-sm font-medium text-foreground">{user.phone_number}</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div><Label className="text-xs font-bold text-slate-600">Username handle</Label><Input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="e.g. mbassa_audeterrence" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
+                        <div><Label className="text-xs font-bold text-slate-600">Email Address String</Label><Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="recycler@domain.cm" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Account Created</p>
-                        <p className="text-sm font-medium text-foreground">{new Date(user.created_at).toLocaleDateString()}</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div><Label className="text-xs font-bold text-slate-600 flex items-center gap-1"><Phone className="h-3 w-3" /> Mobile Connection</Label><Input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} className="bg-white mt-1.5 h-10 rounded-xl font-bold tracking-wide" /></div>
+                        <div>
+                          <Label className="text-xs font-bold text-slate-600 flex items-center gap-1"><MapPin className="h-3 w-3" /> Localized City Area</Label>
+                          <select className="w-full rounded-xl border border-slate-200 bg-white h-10 px-3 py-2 text-xs mt-1.5 font-bold text-slate-700" value={newCity} onChange={(e) => setNewCity(e.target.value)}>
+                            <option value="Douala">Douala (HQ Kiosk Cluster)</option>
+                            <option value="Yaoundé">Yaoundé Terminal</option>
+                            <option value="Buea">Buea Smart Point</option>
+                            <option value="Bafoussam">Bafoussam Outpost</option>
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <CheckCircle className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <p className="text-xs text-muted-foreground">Security Clearance</p>
-                        <p className="text-sm font-medium text-foreground uppercase tracking-wider text-primary">
-                          {user.role}
-                        </p>
+                        <Label className="text-xs font-bold text-purple-900 flex items-center gap-1"><Key className="h-3 w-3 text-purple-600" /> Account Access Password PIN</Label>
+                        <Input type="password" value={newPin} onChange={(e) => setNewPin(e.target.value)} placeholder="Configure security password login PIN (6+ characters)" className="bg-white mt-1.5 h-10 rounded-xl border-purple-200 focus-visible:ring-purple-200" />
                       </div>
-                    </div>
+                      <div className="space-y-2 pt-1">
+                        <Label className="text-xs font-bold text-slate-600 block">Clearance Access Group Privileges</Label>
+                        <div className="flex gap-2">
+                          {["user", "kiosk_admin", "super_admin"].map((roleOption) => (
+                            <button key={roleOption} type="button" onClick={() => setAssignedRole(roleOption as any)} className={`flex-1 p-2.5 text-xs rounded-xl border text-center font-bold transition-all capitalize ${assignedRole === roleOption ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                              {roleOption.replace("_", " ")}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <Button onClick={handleCommitUserCreation} disabled={isProvisioning} className="w-full h-11 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg">
+                        {isProvisioning ? "Provisioning Engine Routing..." : "Commit and Secure Account Entry"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="md:col-span-4 space-y-6">
+                  <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Sparkles className="h-4 w-4 text-amber-500" /> Yield Multiplier Control</CardTitle>
+                      <CardDescription>Trigger dynamic modifier bonuses across chosen streams.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <Label className="text-xs font-bold text-slate-600">Target Material Stream</Label>
+                        <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-semibold text-slate-700" value={fwMaterialId} onChange={(e) => setFwMaterialId(e.target.value)}>
+                          <option value="">Select Stream...</option>
+                          {MATERIALS.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <Label className="text-xs font-bold text-slate-600">Scaling Ratio Modifier</Label>
+                        <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-bold text-slate-800" value={fwMultiplier} onChange={(e) => setFwMultiplier(e.target.value)}>
+                          <option value="1.5">×1.5 Boost</option>
+                          <option value="2.0">×2.0 Double Value</option>
+                          <option value="3.0">×3.0 Surge Value</option>
+                        </select>
+                      </div>
+                      <Button onClick={() => {
+                        const targetMat = MATERIALS.find(m => m.id === fwMaterialId);
+                        if (targetMat) {
+                          setActiveCampaign({ material_id: fwMaterialId, multiplier: Number(fwMultiplier), label: targetMat.name });
+                          setFwMaterialId("");
+                          toast({ title: "Surge Multiplier Engaged", description: `Bonus factors active for ${targetMat.name}.` });
+                        }
+                      }} disabled={!fwMaterialId} className="w-full h-11 font-bold bg-slate-900 text-white hover:bg-slate-800 rounded-xl">Trigger Multiplier Factor</Button>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </TabsContent>
+          )}
+
+          {/* PERSONAL VIEW DETAILS */}
+          <TabsContent value="profile" className="space-y-6 animate-in fade-in duration-150">
+            <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
+              <CardHeader><CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><UserIcon className="h-4 w-4 text-primary" /> Operator Context Details</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-sm font-black">{user.full_name?.charAt(0) || "A"}</div>
+                  <div>
+                    <p className="text-base font-black text-slate-900">{user.full_name}</p>
+                    <p className="text-xs font-semibold text-slate-400">Username ID handle: @{user.username}</p>
                   </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 pt-2">
+                  <ProfileInfoCard icon={<Mail className="h-4 w-4 text-slate-400" />} label="Email Address Contact" value={user.email} />
+                  <ProfileInfoCard icon={<Phone className="h-4 w-4 text-slate-400" />} label="Mobile Phone Target" value={user.phone_number || "No Contact Assigned"} />
+                  <ProfileInfoCard icon={<Calendar className="h-4 w-4 text-slate-400" />} label="Instance Registered" value={new Date(user.created_at).toLocaleDateString()} />
+                  <ProfileInfoCard icon={<AlertCircle className="h-4 w-4 text-purple-600" />} label="Security clearance group" value={user.role?.toUpperCase() || "USER"} isBadge />
                 </div>
               </CardContent>
             </Card>
@@ -403,18 +499,28 @@ const AdminDashboard = () => {
       </main>
     </div>
   );
-};
+}
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4 shadow-card">
-      {icon}
+    <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl shadow-sm">{icon}</div>
       <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-xl font-bold text-foreground">{value}</p>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{label}</p>
+        <p className="text-xl font-black text-slate-900 tracking-tight mt-0.5">{value}</p>
       </div>
     </div>
   );
 }
 
-export default AdminDashboard;
+function ProfileInfoCard({ icon, label, value, isBadge }: { icon: React.ReactNode; label: string; value: string; isBadge?: boolean }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-4 shadow-inner">
+      {icon}
+      <div>
+        <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+        <p className={`text-xs font-bold mt-0.5 ${isBadge ? "text-purple-700 bg-purple-50 border border-purple-100 px-2.5 py-0.5 rounded-md text-[10px]" : "text-slate-800"}`}>{value}</p>
+      </div>
+    </div>
+  );
+}
