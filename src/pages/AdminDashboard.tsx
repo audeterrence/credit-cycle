@@ -22,40 +22,57 @@ const MATERIALS = [
   { id: "mat-glass", name: "Glass Containers", bin_color: "Green", base_unit: 4, base_kg: 25 },
 ];
 
+interface StatCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}
+
+const StatCard = ({ icon, label, value }: StatCardProps) => (
+  <Card className="bg-white border border-slate-100 shadow-sm shadow-slate-100/50 rounded-2xl overflow-hidden">
+    <CardContent className="p-6 flex items-center gap-4">
+      <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center">
+        {icon}
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-bold text-slate-800 mt-0.5">{value}</p>
+      </div>
+    </CardContent>
+  </Card>
+);
+
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Dashboard transactional logs array
+  // Dashboard state variables
   const [submissions, setSubmissions] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
-  // Form Creation State Matrix - Explicitly matches relational table requirements
-  const [newFirstName, setNewFirstName] = useState("");
-  const [newLastName, setNewLastName] = useState("");
-  const [newUsername, setNewUsername] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newCity, setNewCity] = useState("Douala");
-  const [newPhone, setNewPhone] = useState("+237 "); // Enforces regional code pre-fill
-  const [newPin, setNewPin] = useState(""); 
-  const [assignedRole, setAssignedRole] = useState<"user" | "kiosk_admin" | "super_admin">("user");
-  const [isProvisioning, setIsProvisioning] = useState(false);
-
-  // Waste logging elements state
+  // Intake Deposit Transaction Form States
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [weight, setWeight] = useState("");
   const [isSubmittingWaste, setIsSubmittingWaste] = useState(false);
 
-  // Global Promotional Yield Modifiers state
-  const [activeCampaign, setActiveCampaign] = useState<{ material_id: string; multiplier: number; label: string } | null>(null);
-  const [fwMaterialId, setFwMaterialId] = useState("");
-  const [fwMultiplier, setFwMultiplier] = useState("1.5");
+  // Administrative User Provisioning Form States
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newLastName, setNewLastName] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("+237 ");
+  const [newCity, setNewCity] = useState("Douala");
+  const [newPin, setNewPin] = useState("");
+  const [assignedRole, setAssignedRole] = useState("user");
+  const [isProvisioning, setIsProvisioning] = useState(false);
 
-  if (!user) return null;
+  // Promotional Campaign Configurations (Mock state for point multiplier evaluation)
+  const [activeCampaign] = useState<any>({ material_id: "mat-plastic", multiplier: 1.5, name: "May Rouge Influx Burst" });
 
   // Retrieve active transaction records directly from live database instances
   const fetchGlobalSubmissions = async () => {
@@ -70,14 +87,21 @@ export default function AdminDashboard() {
     fetchGlobalSubmissions();
   }, []);
 
-  // Live Metric Telemetry calculations
+  // =========================================================================
+  // LIVE METRIC TELEMETRY CALCULATIONS (ISOLATED STRICTLY TO THIS OPERATOR)
+  // =========================================================================
   const todayStr = new Date().toDateString();
-  const todaySubs = submissions.filter(s => new Date(s.created_at).toDateString() === todayStr);
+  
+  // Filters submissions processed strictly by THIS manager/operator session today
+  const todaySubs = submissions.filter(
+    s => new Date(s.created_at).toDateString() === todayStr && s.operator_id === user?.id
+  );
   const todayCredits = todaySubs.reduce((acc, s) => acc + (s.credits_awarded || 0), 0);
   const todayUsersCount = new Set(todaySubs.map(s => s.user_id)).size;
 
   const materialBreakdown = MATERIALS.map(m => {
-    const matched = submissions.filter(s => s.material_id === m.id);
+    // Isolate stream performance tracking specifically to this current manager too
+    const matched = submissions.filter(s => s.material_id === m.id && s.operator_id === user?.id);
     return {
       material: m,
       count: matched.length,
@@ -86,25 +110,114 @@ export default function AdminDashboard() {
     };
   });
 
-  const handleSearchUsers = async () => {
-    if (!searchQuery.trim()) return;
-    const query = searchQuery.toLowerCase().trim();
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .or(`username.ilike.%${query}%,email.ilike.%${query}%`);
+  // Handle active account lookups
+  const handleUserSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchTerm.trim()) return;
+    setIsSearching(true);
+    setSelectedUser(null);
 
-    if (!error && data) {
-      setSearchResults(data);
-      if (data.length === 0) {
-        toast({ title: "Account Not Found", description: "Use the advanced identity form below to onboard this profile." });
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .or(`username.ilike.%${searchTerm.trim()}%,email.ilike.%${searchTerm.trim()}%`);
+
+      if (error) throw error;
+      setSearchResults(data || []);
+      if (!data || data.length === 0) {
+        toast({ variant: "destructive", title: "No Accounts Found", description: "Verify account username spelling." });
       }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Search Aborted", description: err.message });
+    } finally {
+      setIsSearching(false);
     }
   };
 
-  const handleCommitUserCreation = async () => {
+  // =========================================================================
+  // CORE METRIC INTAKE TRANSACTION HANDLER (WITH IMMEDIATE DB COALESCE UPDATE)
+  // =========================================================================
+  const handleLogIntakeDeposit = async () => {
+    if (!selectedUser || !materialId || !quantity) return;
+    setIsSubmittingWaste(true);
+
+    try {
+      const selectedMat = MATERIALS.find(m => m.id === materialId);
+      if (!selectedMat) return;
+
+      let baseYield = Number(quantity) * selectedMat.base_unit;
+      if (weight && Number(weight) > 0) {
+        const kgYield = Number(weight) * selectedMat.base_kg;
+        baseYield = Math.max(baseYield, kgYield);
+      }
+
+      if (activeCampaign && activeCampaign.material_id === materialId) {
+        baseYield = baseYield * activeCampaign.multiplier;
+      }
+
+      const finalCreditsCalculated = Math.round(baseYield);
+      const inputWeight = weight ? Number(weight) : 0;
+
+      // 1. Log transaction into live audit tracking table with manager reference tracking
+      const { error: subError } = await supabase.from("waste_submissions").insert({
+        user_id: selectedUser.id,
+        operator_id: user?.id, // Stamps log with active manager ID
+        material_id: materialId,
+        quantity_units: Number(quantity),
+        weight_kg: weight ? Number(weight) : null,
+        credits_awarded: finalCreditsCalculated,
+        status: "APPROVED"
+      });
+
+      if (subError) throw subError;
+
+      // 2. IMMEDIATE WALLET BALANCE DATABASE COALESCE INJECTION
+      const newTotalCredits = (selectedUser.total_credits || 0) + finalCreditsCalculated;
+      const newCredits = (selectedUser.credits || 0) + finalCreditsCalculated;
+      const newRecycledVolume = Number(selectedUser.total_recycled_kg || 0) + inputWeight;
+
+      const { error: profileUpdateError } = await supabase
+        .from("profiles")
+        .update({
+          total_credits: newTotalCredits,
+          credits: newCredits, // Updates dual architectural fallback variants safely
+          total_recycled_kg: newRecycledVolume
+        })
+        .eq("id", selectedUser.id);
+
+      if (profileUpdateError) throw profileUpdateError;
+
+      // 3. Clear forms and fetch fresh unified telemetry states
+      setMaterialId(""); setQuantity(""); setWeight("");
+      await fetchGlobalSubmissions();
+
+      // Reflect structural changes cleanly inside active state focus context
+      setSelectedUser((prev: any) => 
+        prev ? { 
+          ...prev, 
+          total_credits: newTotalCredits, 
+          credits: newCredits,
+          total_recycled_kg: newRecycledVolume
+        } : null
+      );
+
+      toast({ 
+        title: "Transaction Dispatched", 
+        description: `${finalCreditsCalculated} points safely committed to user balance @${selectedUser.username}` 
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Ledger Update Failed", description: err.message });
+    } finally {
+      setIsSubmittingWaste(false);
+    }
+  };
+
+  // Administrative User Provisioning Form Actions
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!newFirstName || !newLastName || !newUsername || !newEmail || !newPin) {
-      toast({ variant: "destructive", title: "Incomplete Attributes", description: "All registration fields must be populated." });
+      toast({ variant: "destructive", title: "Incomplete Attributes", description: "All fields are mandatory." });
       return;
     }
 
@@ -113,7 +226,6 @@ export default function AdminDashboard() {
       const formattedPhone = newPhone.trim();
       const compiledFullName = `${newFirstName.trim()} ${newLastName.trim()}`;
 
-      // Call database transaction query endpoint using RPC mapping formats
       const { data: newUserId, error } = await supabase.rpc("create_user_v2", {
         p_email: newEmail.trim().toLowerCase(),
         p_password: newPin,
@@ -129,10 +241,9 @@ export default function AdminDashboard() {
 
       toast({
         title: "Database Entry Saved",
-        description: `Successfully generated ${compiledFullName} profile mapped as clearance group [${assignedRole}].`
+        description: `Successfully provisioned account for ${compiledFullName} [${assignedRole}].`
       });
 
-      // Safely flush forms and restore original local regional placeholder strings
       setNewFirstName(""); setNewLastName(""); setNewUsername("");
       setNewEmail(""); setNewPhone("+237 "); setNewPin("");
     } catch (err: any) {
@@ -142,53 +253,9 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleLogIntakeDeposit = async () => {
-    if (!selectedUser || !materialId || !quantity) return;
-    setIsSubmittingWaste(true);
-
-    try {
-      const selectedMat = MATERIALS.find(m => m.id === materialId);
-      if (!selectedMat) return;
-
-      // Point scaling formula metrics configuration rules
-      let baseYield = Number(quantity) * selectedMat.base_unit;
-      if (weight && Number(weight) > 0) {
-        const kgYield = Number(weight) * selectedMat.base_kg;
-        baseYield = Math.max(baseYield, kgYield);
-      }
-
-      // Check if a global yield campaign is active for this target stream
-      if (activeCampaign && activeCampaign.material_id === materialId) {
-        baseYield = baseYield * activeCampaign.multiplier;
-      }
-
-      const finalCreditsCalculated = Math.round(baseYield);
-
-      // 1. Log transaction into live audit tracking tables
-      const { error: subError } = await supabase.from("waste_submissions").insert({
-        user_id: selectedUser.id,
-        material_id: materialId,
-        quantity_units: Number(quantity),
-        weight_kg: weight ? Number(weight) : null,
-        credits_awarded: finalCreditsCalculated,
-        status: "APPROVED"
-      });
-
-      if (subError) throw subError;
-
-      // 2. Clear input entries and sync state logs smoothly
-      setMaterialId(""); setQuantity(""); setWeight("");
-      await fetchGlobalSubmissions();
-
-      // Instantly increment point metrics visually on current focused account item state container
-      setSelectedUser((prev: any) => prev ? { ...prev, total_credits: (prev.total_credits || 0) + finalCreditsCalculated } : null);
-
-      toast({ title: "Transaction Dispatched", description: `${finalCreditsCalculated} points added to account wallet @${selectedUser.username}` });
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Ledger Update Failed", description: err.message });
-    } finally {
-      setIsSubmittingWaste(false);
-    }
+  const handleLogoutAction = async () => {
+    await logout();
+    navigate("/login");
   };
 
   return (
@@ -198,184 +265,251 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-2 font-display text-xl font-bold text-slate-900">
             <div className="bg-primary p-1.5 rounded-xl text-white"><Recycle className="h-5 w-5" /></div>
             <span>Credi-Can Central Workspace</span>
-            <span className={`ml-2 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
-              user.role === "super_admin" ? "bg-purple-100 text-purple-700 border border-purple-200" : "bg-orange-100 text-orange-700 border border-orange-200"
-            }`}>
-              {user.role === "super_admin" ? "Super Admin Account" : "Kiosk Handler Mode"}
+            <span className="ml-2 rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100 capitalize">
+              {user?.role || "Operator Portal"}
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-slate-700">{user.full_name}</span>
-            <Button variant="ghost" size="icon" onClick={logout} className="hover:bg-slate-100 rounded-xl"><LogOut className="h-5 w-5 text-slate-500" /></Button>
-          </div>
+          <Button variant="ghost" size="sm" onClick={handleLogoutAction} className="text-slate-500 hover:text-rose-600 transition-colors gap-2 rounded-xl">
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline font-medium text-xs">Terminate Session</span>
+          </Button>
         </div>
       </header>
 
-      <main className="container max-w-6xl py-8 space-y-6">
-        {/* Real-time Telemetry Analytics Units */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={<CheckCircle className="h-5 w-5 text-emerald-600" />} label="Today's Material Influx" value={todaySubs.length} />
-          <StatCard icon={<Coins className="h-5 w-5 text-amber-600" />} label="Today's Distributed Tokens" value={todayCredits} />
-          <StatCard icon={<Users className="h-5 w-5 text-blue-600" />} label="Active Handled Recyclers" value={todayUsersCount} />
-          <StatCard icon={<Package className="h-5 w-5 text-indigo-600" />} label="System Lifetime Submissions" value={submissions.length} />
+      <main className="container py-8 space-y-8 animate-in fade-in duration-300">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Operational Dashboard</h1>
+          <p className="text-sm text-slate-500">Welcome back, <span className="font-semibold text-slate-700">{user?.first_name || "Administrator"}</span>. Tracking processed logs below.</p>
         </div>
 
-        {/* Global Promotional Surge Yield Banner */}
-        {activeCampaign && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm backdrop-blur-sm animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <span className="text-xl">⚡</span>
-              <div>
-                <p className="text-sm font-bold text-amber-900">Dynamic Multiplier Yield Engine Running Globally</p>
-                <p className="text-xs text-amber-700">{activeCampaign.label} items are scaling points directly at <span className="font-bold">×{activeCampaign.multiplier} values</span>.</p>
-              </div>
-            </div>
-            {user.role === "super_admin" && (
-              <Button variant="ghost" size="sm" onClick={() => setActiveCampaign(null)} className="text-amber-800 hover:text-red-600 hover:bg-amber-100/50 font-bold gap-1.5 rounded-lg">
-                <Trash2 className="h-3.5 w-3.5" /> Terminate Campaign
-              </Button>
-            )}
-          </div>
-        )}
+        {/* Real-time Telemetry Analytics Units */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard icon={<CheckCircle className="h-5 w-5 text-emerald-600" />} label="Your Material Influx" value={todaySubs.length} />
+          <StatCard icon={<Coins className="h-5 w-5 text-amber-600" />} label="Your Distributed Tokens" value={todayCredits} />
+          <StatCard icon={<Users className="h-5 w-5 text-blue-600" />} label="Active Handled Recyclers" value={todayUsersCount} />
+          <StatCard icon={<Package className="h-5 w-5 text-indigo-600" />} label="System Total History Logs" value={submissions.length} />
+        </div>
 
-        <Tabs defaultValue="kiosk" className="space-y-4">
-          <TabsList className="bg-slate-200/60 p-1 rounded-xl border border-slate-200/40">
-            <TabsTrigger value="kiosk" className="gap-1.5 rounded-lg font-bold">Kiosk Terminal</TabsTrigger>
-            <TabsTrigger value="reports" className="gap-1.5 rounded-lg font-bold">Performance Matrix</TabsTrigger>
-            {user.role === "super_admin" && <TabsTrigger value="provisioning" className="gap-1.5 rounded-lg font-bold text-purple-700 data-[state=active]:text-purple-900">User & Personnel Control</TabsTrigger>}
-            <TabsTrigger value="profile" className="gap-1.5 rounded-lg font-bold">Terminal Identity</TabsTrigger>
+        <Tabs defaultValue="intake" className="space-y-6">
+          <TabsList className="bg-white border border-slate-200/60 p-1 rounded-xl shadow-sm gap-1 w-full sm:w-auto overflow-x-auto justify-start">
+            <TabsTrigger value="intake" className="rounded-lg text-xs font-semibold gap-2 px-4 py-2"><Recycle className="h-3.5 w-3.5" /> Log Waste Deposit</TabsTrigger>
+            <TabsTrigger value="provisioning" className="rounded-lg text-xs font-semibold gap-2 px-4 py-2"><UserPlus className="h-3.5 w-3.5" /> Onboard Profiles</TabsTrigger>
+            <TabsTrigger value="analytics" className="rounded-lg text-xs font-semibold gap-2 px-4 py-2"><BarChart3 className="h-3.5 w-3.5" /> Stream Ledger Statistics</TabsTrigger>
           </TabsList>
 
-          {/* KIOSK TRANSACTION PANEL */}
-          <TabsContent value="kiosk" className="space-y-6 animate-in fade-in duration-150">
-            <div className="grid gap-6 md:grid-cols-12 items-start">
-              <div className="md:col-span-7 space-y-6">
-                <Card className="border-slate-200 shadow-sm bg-white rounded-2xl">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Search className="h-4 w-4 text-primary" /> Recycler Identity Verification</CardTitle>
-                    <CardDescription>Search by registered username handle strings.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Search profile identifiers..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSearchUsers()}
-                        className="bg-slate-50 border-slate-200 h-11 focus-visible:ring-primary/20 rounded-xl"
-                      />
-                      <Button onClick={handleSearchUsers} className="h-11 px-5 font-bold rounded-xl">Search Index</Button>
-                    </div>
+          <TabsContent value="intake" className="grid gap-6 md:grid-cols-12 items-start outline-none">
+            {/* Account Finder Sub-Panel */}
+            <Card className="md:col-span-5 bg-white border border-slate-100 shadow-sm rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-slate-50 p-6 bg-slate-50/40">
+                <CardTitle className="text-base font-bold text-slate-800">Identify Recycler Identity</CardTitle>
+                <CardDescription className="text-xs">Query systemic records via account username attributes</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6">
+                <form onSubmit={handleUserSearch} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <Input placeholder="Enter unique user handle..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 rounded-xl bg-slate-50/50 border-slate-200 focus-visible:ring-primary h-10 text-xs font-medium" />
+                  </div>
+                  <Button type="submit" disabled={isSearching} className="rounded-xl px-4 font-semibold text-xs h-10 bg-primary hover:bg-primary/95 text-white shadow-sm shadow-primary/10">
+                    {isSearching ? <Activity className="h-4 w-4 animate-spin" /> : "Query"}
+                  </Button>
+                </form>
 
-                    {searchResults.length > 0 && (
-                      <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white max-h-48 overflow-y-auto shadow-inner">
-                        {searchResults.map((u) => (
-                          <button key={u.id} onClick={() => { setSelectedUser(u); setSearchResults([]); setSearchQuery(""); }} className="flex w-full items-center justify-between p-4 text-left hover:bg-slate-50 transition-colors">
-                            <div>
-                              <p className="font-bold text-slate-800">{u.first_name} {u.last_name} <span className="text-slate-400 font-normal">@{u.username}</span></p>
-                              <p className="text-xs text-slate-500">{u.email} · Location: {u.city || "Douala"}</p>
-                            </div>
-                            <span className="text-xs font-black text-primary bg-primary/5 px-2.5 py-1 rounded-full">{u.total_credits || 0} cr</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {selectedUser && (
-                      <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/5 p-4 animate-in fade-in">
-                        <div>
-                          <span className="text-[9px] font-black uppercase tracking-wider text-primary/70">Selected Wallet Target</span>
-                          <p className="text-base font-black text-slate-900">{selectedUser.first_name} {selectedUser.last_name} <span className="text-slate-500 font-normal text-sm">@{selectedUser.username}</span></p>
+                {searchResults.length > 0 && !selectedUser && (
+                  <div className="border border-slate-100 rounded-xl divide-y divide-slate-50 overflow-hidden bg-slate-50/30">
+                    {searchResults.map((u) => (
+                      <div key={u.id} onClick={() => setSelectedUser(u)} className="p-4 flex items-center justify-between cursor-pointer hover:bg-white transition-all group">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 font-bold text-xs capitalize">{u.username.slice(0,2)}</div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-800">@{u.username}</p>
+                            <p className="text-[10px] font-medium text-slate-400 mt-0.5">{u.first_name} {u.last_name}</p>
+                          </div>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setSelectedUser(null)} className="border-slate-200 bg-white font-bold rounded-lg shadow-sm">Reset</Button>
+                        <Button size="sm" variant="ghost" className="text-[10px] font-bold text-primary group-hover:bg-primary/5 rounded-lg px-2.5 h-7">Select</Button>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
+                    ))}
+                  </div>
+                )}
 
                 {selectedUser && (
-                  <Card className="border-slate-200 shadow-sm bg-white rounded-2xl animate-in slide-in-from-bottom-2 duration-200">
-                    <CardHeader>
-                      <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Package className="h-4 w-4 text-primary" /> Input Material Intake Measurements</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <div>
-                          <Label className="text-xs font-bold text-slate-500">Material Variant</Label>
-                          <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-primary/20" value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
-                            <option value="">Select Stream...</option>
-                            {MATERIALS.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.bin_color})</option>)}
-                          </select>
+                  <div className="p-4 border border-emerald-100 bg-emerald-50/20 rounded-2xl relative space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 font-bold text-sm capitalize">{selectedUser.username.slice(0,2)}</div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-xs font-bold text-slate-800">@{selectedUser.username}</h3>
+                          <span className="rounded-full bg-emerald-100/60 text-emerald-700 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide border border-emerald-200/40">Focused</span>
                         </div>
-                        <div><Label className="text-xs font-bold text-slate-500">Quantity (Units)</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 15" className="h-11 mt-1.5 rounded-xl bg-white" /></div>
-                        <div><Label className="text-xs font-bold text-slate-500">Mass (kg, Optional)</Label><Input type="number" min="0" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 2.5" className="h-11 mt-1.5 rounded-xl bg-white" /></div>
+                        <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{selectedUser.first_name} {selectedUser.last_name}</p>
                       </div>
-                      <Button onClick={handleLogIntakeDeposit} disabled={!materialId || !quantity || isSubmittingWaste} className="w-full h-11 font-bold rounded-xl shadow-md">
-                        {isSubmittingWaste ? "Processing Deposit Ledger..." : "Award Balance Credits Instantly"}
-                      </Button>
-                    </CardContent>
-                  </Card>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3.5 text-center">
+                      <div className="bg-white/80 border border-slate-100/80 p-2.5 rounded-xl">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Wallet Balance</p>
+                        <p className="text-lg font-bold text-slate-800 mt-0.5">{selectedUser.total_credits || selectedUser.credits || 0} pts</p>
+                      </div>
+                      <div className="bg-white/80 border border-slate-100/80 p-2.5 rounded-xl">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Recycled Mass</p>
+                        <p className="text-lg font-bold text-slate-800 mt-0.5">{selectedUser.total_recycled_kg || 0} kg</p>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedUser(null)} className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 text-[10px] font-bold rounded-lg h-6 px-2">Reset</Button>
+                  </div>
                 )}
-              </div>
+              </CardContent>
+            </Card>
 
-              {/* LOCAL TERMINAL HISTORY LIST FEED */}
-              <div className="md:col-span-5 space-y-6">
-                <Card className="border-slate-200 shadow-sm bg-white rounded-2xl">
-                  <CardHeader><CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Activity className="h-4 w-4 text-primary" /> Operational Terminal Log Feed</CardTitle></CardHeader>
-                  <CardContent>
-                    {submissions.length === 0 ? (
-                      <div className="py-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-slate-50/50">No operational histories recorded today.</div>
-                    ) : (
-                      <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
-                        {submissions.slice(0, 6).map((s) => {
-                          const mat = MATERIALS.find(m => m.id === s.material_id);
-                          return (
-                            <div key={s.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
-                              <div>
-                                <p className="text-xs font-bold text-slate-800">{mat?.name || "Assorted Batch"}</p>
-                                <p className="text-[10px] text-slate-400 font-medium">{s.quantity_units} Items · {s.weight_kg ? `${s.weight_kg} kg` : "No Scale Metric"}</p>
-                              </div>
-                              <span className="text-xs font-black text-emerald-600">+{s.credits_awarded} cr</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+            {/* Intake Ledger Logging Panel */}
+            <Card className="md:col-span-7 bg-white border border-slate-100 shadow-sm rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-slate-50 p-6 bg-slate-50/40">
+                <CardTitle className="text-base font-bold text-slate-800">Log Waste Ledger Records</CardTitle>
+                <CardDescription className="text-xs">Allocate points derived from scale telemetry indices</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-slate-600">Material Stream Type</Label>
+                    <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3.5 h-10 text-xs font-medium focus:outline-none focus:border-primary text-slate-700">
+                      <option value="">Select Target Material Classification...</option>
+                      {MATERIALS.map(m => (
+                        <option key={m.id} value={m.id}>{m.name} ({m.bin_color} Sorting Channel)</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-slate-600">Item Unit Count</Label>
+                    <Input type="number" placeholder="Example: 12 bottles..." value={quantity} onChange={(e) => setQuantity(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-slate-600">Physical Weight Yield (Optional kilograms override)</Label>
+                  <Input type="number" placeholder="Example: 4.5kg..." value={weight} onChange={(e) => setWeight(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                </div>
+
+                {materialId && quantity && (
+                  <div className="p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-xl flex items-center justify-between text-xs font-semibold text-indigo-700 animate-in fade-in slide-in-from-top-1">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-indigo-500 animate-pulse" />
+                      <span>Estimated Points Matrix Yield:</span>
+                    </div>
+                    <span className="text-base font-extrabold text-indigo-600">
+                      {Math.round(
+                        Number(quantity) * (MATERIALS.find(m => m.id === materialId)?.base_unit || 1) * (activeCampaign?.material_id === materialId ? activeCampaign.multiplier : 1)
+                      )} pts
+                    </span>
+                  </div>
+                )}
+
+                <Button onClick={handleLogIntakeDeposit} disabled={isSubmittingWaste || !selectedUser || !materialId || !quantity} className="w-full rounded-xl font-bold text-xs h-11 bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/10 gap-2 mt-4 transition-all disabled:opacity-40">
+                  {isSubmittingWaste ? <Activity className="h-4 w-4 animate-spin" /> : "Commit Point Settlement Balance"}
+                </Button>
+              </CardContent>
+            </Card>
           </TabsContent>
 
-          {/* PERFORMANCE BREAKDOWN MATRIX */}
-          <TabsContent value="reports" className="space-y-6 animate-in fade-in duration-150">
-            <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
-              <CardHeader><CardTitle className="text-base font-bold text-slate-900">Material Stream Performance Matrix</CardTitle></CardHeader>
-              <CardContent>
-                <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm bg-white">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-900 text-white font-bold">
-                      <tr>
-                        <th className="px-4 py-3 text-left">Material Stream</th>
-                        <th className="px-4 py-3 text-left">Bin Assignment</th>
-                        <th className="px-4 py-3 text-right">Total Operations</th>
-                        <th className="px-4 py-3 text-right">Collected Units</th>
-                        <th className="px-4 py-3 text-right">Distributed Tokens</th>
+          {/* Account Onboarding Form Block Panel */}
+          <TabsContent value="provisioning" className="outline-none">
+            <Card className="bg-white border border-slate-100 shadow-sm rounded-2xl overflow-hidden max-w-3xl mx-auto">
+              <CardHeader className="border-b border-slate-50 p-6 bg-slate-50/40">
+                <CardTitle className="text-base font-bold text-slate-800">Onboard System Profiles</CardTitle>
+                <CardDescription className="text-xs">Generate credentials and roles completely secured inside the cloud layer</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6">
+                <form onSubmit={handleCreateUser} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">First Name</Label>
+                      <Input placeholder="John" value={newFirstName} onChange={(e) => setNewFirstName(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Last Name</Label>
+                      <Input placeholder="Doe" value={newLastName} onChange={(e) => setNewLastName(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Account Username</Label>
+                      <Input placeholder="johndoe_2026" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Email Address</Label>
+                      <Input type="email" placeholder="john@example.cm" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Phone Number (+237)</Label>
+                      <Input placeholder="+237 677889900" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Regional Municipality Location</Label>
+                      <select value={newCity} onChange={(e) => setNewCity(e.target.value)} className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3.5 h-10 text-xs font-medium focus:outline-none focus:border-primary text-slate-700">
+                        <option value="Douala">Douala (Littoral)</option>
+                        <option value="Yaoundé">Yaoundé (Centre)</option>
+                        <option value="Buea">Buea (South West)</option>
+                        <option value="Bamenda">Bamenda (North West)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">Authentication Security PIN</Label>
+                      <Input type="password" placeholder="6-digit PIN numerical security string..." value={newPin} onChange={(e) => setNewPin(e.target.value)} className="rounded-xl bg-slate-50/50 border-slate-200 h-10 text-xs font-medium focus-visible:ring-primary" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-bold text-slate-600">System Permission Security clearance</Label>
+                      <select value={assignedRole} onChange={(e) => setAssignedRole(e.target.value)} className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3.5 h-10 text-xs font-medium focus:outline-none focus:border-primary text-slate-700">
+                        <option value="user">Standard User (End Recycler Wallet View)</option>
+                        <option value="kiosk_admin">Kiosk Admin (Operational Supervisor Interface)</option>
+                        <option value="super_admin">Super Admin (Global System Controller Clearance)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <Button type="submit" disabled={isProvisioning} className="w-full rounded-xl font-bold text-xs h-11 bg-primary hover:bg-primary/95 text-white shadow-md shadow-primary/10 gap-2 mt-4 transition-all">
+                    {isProvisioning ? <Activity className="h-4 w-4 animate-spin" /> : "Finalize Account Provisioning Profile"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Operational Metrics Charts Breakdown Panel */}
+          <TabsContent value="analytics" className="outline-none">
+            <Card className="bg-white border border-slate-100 shadow-sm rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-slate-50 p-6 bg-slate-50/40">
+                <CardTitle className="text-base font-bold text-slate-800">Stream Performance Statistics Summary</CardTitle>
+                <CardDescription className="text-xs">Isolate your handled material metrics tracked across deployment scopes today</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-slate-600 border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50/70 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        <th className="px-6 py-4">Classification Parameter</th>
+                        <th className="px-4 py-4 text-center">Color Code Channel</th>
+                        <th className="px-4 py-4 text-right">Total Operations Handled</th>
+                        <th className="px-4 py-4 text-right">Collected Influx Units</th>
+                        <th className="px-6 py-4 text-right">Tokens Dispatched Today</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                       {materialBreakdown.map((row) => (
-                        <tr key={row.material.id} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-3.5 font-bold text-slate-800">{row.material.name}</td>
-                          <td className="px-4 py-3.5 text-slate-500">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: row.material.bin_color === 'Orange' ? '#f97316' : row.material.bin_color === 'Yellow' ? '#eab308' : row.material.bin_color === 'Red' ? '#ef4444' : '#22c55e' }} />
-                              {row.material.bin_color}
+                        <tr key={row.material.id} className="hover:bg-slate-50/40 transition-colors">
+                          <td className="px-6 py-4 font-bold text-slate-800">{row.material.name}</td>
+                          <td className="px-4 py-4 text-center">
+                            <span className="inline-flex items-center rounded-full px-2 py-0.5 font-semibold text-[10px] bg-slate-100 text-slate-600 border border-slate-200">
+                              {row.material.bin_color} Bin
                             </span>
                           </td>
-                          <td className="px-4 py-3.5 text-right font-semibold text-slate-600">{row.count}</td>
-                          <td className="px-4 py-3.5 text-right font-bold text-slate-900">{row.units} items</td>
-                          <td className="px-4 py-3.5 text-right font-black text-primary">+{row.credits} cr</td>
+                          <td className="px-4 py-4 text-right font-semibold text-slate-500">{row.count} deposits</td>
+                          <td className="px-4 py-4 text-right font-bold text-slate-800">{row.units} units</td>
+                          <td className="px-6 py-4 text-right font-extrabold text-emerald-600">+{row.credits} pts</td>
                         </tr>
                       ))}
                     </tbody>
@@ -384,143 +518,8 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
-
-          {/* ADVANCED DB ALIGNED IDENTITY PROVISIONING TAB */}
-          {user.role === "super_admin" && (
-            <TabsContent value="provisioning" className="space-y-6 animate-in slide-in-from-left-2 duration-150">
-              <div className="grid gap-6 md:grid-cols-12 items-start">
-                <div className="md:col-span-8 space-y-6">
-                  <Card className="border-purple-200 bg-white rounded-2xl shadow-sm border-2">
-                    <CardHeader className="bg-purple-50/40 border-b border-purple-100 rounded-t-2xl">
-                      <CardTitle className="text-base flex items-center gap-2 text-purple-900 font-black"><ShieldCheck className="h-4 w-4 text-purple-600" /> Database-Aligned Identity Provisioning Desk</CardTitle>
-                      <CardDescription className="text-purple-700/80">Onboard profiles structured strictly with your public schema variables.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="pt-5 space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div><Label className="text-xs font-bold text-slate-600">First Name</Label><Input value={newFirstName} onChange={(e) => setNewFirstName(e.target.value)} placeholder="e.g. Terrence" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
-                        <div><Label className="text-xs font-bold text-slate-600">Last Name</Label><Input value={newLastName} onChange={(e) => setNewLastName(e.target.value)} placeholder="e.g. Mbassa" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
-                      </div>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div><Label className="text-xs font-bold text-slate-600">Username handle</Label><Input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="e.g. mbassa_audeterrence" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
-                        <div><Label className="text-xs font-bold text-slate-600">Email Address String</Label><Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="recycler@domain.cm" className="bg-white mt-1.5 h-10 rounded-xl" /></div>
-                      </div>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div><Label className="text-xs font-bold text-slate-600 flex items-center gap-1"><Phone className="h-3 w-3" /> Mobile Connection</Label><Input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} className="bg-white mt-1.5 h-10 rounded-xl font-bold tracking-wide" /></div>
-                        <div>
-                          <Label className="text-xs font-bold text-slate-600 flex items-center gap-1"><MapPin className="h-3 w-3" /> Localized City Area</Label>
-                          <select className="w-full rounded-xl border border-slate-200 bg-white h-10 px-3 py-2 text-xs mt-1.5 font-bold text-slate-700" value={newCity} onChange={(e) => setNewCity(e.target.value)}>
-                            <option value="Douala">Douala (HQ Kiosk Cluster)</option>
-                            <option value="Yaoundé">Yaoundé Terminal</option>
-                            <option value="Buea">Buea Smart Point</option>
-                            <option value="Bafoussam">Bafoussam Outpost</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-xs font-bold text-purple-900 flex items-center gap-1"><Key className="h-3 w-3 text-purple-600" /> Account Access Password PIN</Label>
-                        <Input type="password" value={newPin} onChange={(e) => setNewPin(e.target.value)} placeholder="Configure security password login PIN (6+ characters)" className="bg-white mt-1.5 h-10 rounded-xl border-purple-200 focus-visible:ring-purple-200" />
-                      </div>
-                      <div className="space-y-2 pt-1">
-                        <Label className="text-xs font-bold text-slate-600 block">Clearance Access Group Privileges</Label>
-                        <div className="flex gap-2">
-                          {["user", "kiosk_admin", "super_admin"].map((roleOption) => (
-                            <button key={roleOption} type="button" onClick={() => setAssignedRole(roleOption as any)} className={`flex-1 p-2.5 text-xs rounded-xl border text-center font-bold transition-all capitalize ${assignedRole === roleOption ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
-                              {roleOption.replace("_", " ")}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <Button onClick={handleCommitUserCreation} disabled={isProvisioning} className="w-full h-11 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg">
-                        {isProvisioning ? "Provisioning Engine Routing..." : "Commit and Secure Account Entry"}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <div className="md:col-span-4 space-y-6">
-                  <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
-                    <CardHeader>
-                      <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><Sparkles className="h-4 w-4 text-amber-500" /> Yield Multiplier Control</CardTitle>
-                      <CardDescription>Trigger dynamic modifier bonuses across chosen streams.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <Label className="text-xs font-bold text-slate-600">Target Material Stream</Label>
-                        <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-semibold text-slate-700" value={fwMaterialId} onChange={(e) => setFwMaterialId(e.target.value)}>
-                          <option value="">Select Stream...</option>
-                          {MATERIALS.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <Label className="text-xs font-bold text-slate-600">Scaling Ratio Modifier</Label>
-                        <select className="w-full rounded-xl border border-slate-200 bg-white h-11 px-3 py-2 text-xs mt-1.5 font-bold text-slate-800" value={fwMultiplier} onChange={(e) => setFwMultiplier(e.target.value)}>
-                          <option value="1.5">×1.5 Boost</option>
-                          <option value="2.0">×2.0 Double Value</option>
-                          <option value="3.0">×3.0 Surge Value</option>
-                        </select>
-                      </div>
-                      <Button onClick={() => {
-                        const targetMat = MATERIALS.find(m => m.id === fwMaterialId);
-                        if (targetMat) {
-                          setActiveCampaign({ material_id: fwMaterialId, multiplier: Number(fwMultiplier), label: targetMat.name });
-                          setFwMaterialId("");
-                          toast({ title: "Surge Multiplier Engaged", description: `Bonus factors active for ${targetMat.name}.` });
-                        }
-                      }} disabled={!fwMaterialId} className="w-full h-11 font-bold bg-slate-900 text-white hover:bg-slate-800 rounded-xl">Trigger Multiplier Factor</Button>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            </TabsContent>
-          )}
-
-          {/* PERSONAL VIEW DETAILS */}
-          <TabsContent value="profile" className="space-y-6 animate-in fade-in duration-150">
-            <Card className="border-slate-200 bg-white rounded-2xl shadow-sm">
-              <CardHeader><CardTitle className="text-base flex items-center gap-2 text-slate-900 font-bold"><UserIcon className="h-4 w-4 text-primary" /> Operator Context Details</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-sm font-black">{user.full_name?.charAt(0) || "A"}</div>
-                  <div>
-                    <p className="text-base font-black text-slate-900">{user.full_name}</p>
-                    <p className="text-xs font-semibold text-slate-400">Username ID handle: @{user.username}</p>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 pt-2">
-                  <ProfileInfoCard icon={<Mail className="h-4 w-4 text-slate-400" />} label="Email Address Contact" value={user.email} />
-                  <ProfileInfoCard icon={<Phone className="h-4 w-4 text-slate-400" />} label="Mobile Phone Target" value={user.phone_number || "No Contact Assigned"} />
-                  <ProfileInfoCard icon={<Calendar className="h-4 w-4 text-slate-400" />} label="Instance Registered" value={new Date(user.created_at).toLocaleDateString()} />
-                  <ProfileInfoCard icon={<AlertCircle className="h-4 w-4 text-purple-600" />} label="Security clearance group" value={user.role?.toUpperCase() || "USER"} isBadge />
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
       </main>
-    </div>
-  );
-}
-
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
-  return (
-    <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl shadow-sm">{icon}</div>
-      <div>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{label}</p>
-        <p className="text-xl font-black text-slate-900 tracking-tight mt-0.5">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function ProfileInfoCard({ icon, label, value, isBadge }: { icon: React.ReactNode; label: string; value: string; isBadge?: boolean }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-4 shadow-inner">
-      {icon}
-      <div>
-        <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{label}</p>
-        <p className={`text-xs font-bold mt-0.5 ${isBadge ? "text-purple-700 bg-purple-50 border border-purple-100 px-2.5 py-0.5 rounded-md text-[10px]" : "text-slate-800"}`}>{value}</p>
-      </div>
     </div>
   );
 }
