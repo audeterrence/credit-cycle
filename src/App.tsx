@@ -16,29 +16,27 @@ import Partner from "./pages/Partner";
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute = ({ children, requiredRole }: { children: React.ReactNode, requiredRole?: string }) => {
-  const { user, role, loading } = useAuth();
+const ProtectedRoute = ({ children, requiredRole }: { children: React.ReactNode, requiredRole?: 'user' | 'super_admin' | 'kiosk_admin' }) => {
+  const { user, loading } = useAuth();
 
-  // 1. Show spinner while AuthContext is working
   if (loading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-          <p className="text-sm font-medium text-slate-500 tracking-wide">Securing Session...</p>
+          <p className="text-sm font-medium text-slate-500 tracking-wide">Securing session...</p>
         </div>
       </div>
     );
   }
 
-  // 2. Not logged in? Go to login
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // 3. Logged in but missing the specific role? Go to general dashboard
-  if (requiredRole && role !== requiredRole) {
-    // If role is null but loading is false, it means the profile fetch failed or role isn't set
+  if (requiredRole && user.role !== requiredRole) {
+    if (user.role === 'super_admin') return <Navigate to="/admin" replace />;
+    if (user.role === 'kiosk_admin') return <Navigate to="/kiosk-dashboard" replace />;
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -59,19 +57,19 @@ const App = () => (
             
             {/* USER DASHBOARD */}
             <Route path="/dashboard" element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredRole="user">
                 <Dashboard />
               </ProtectedRoute>
             } />
 
-            {/* ADMIN DASHBOARD */}
-            <Route path="/admin-dashboard" element={
+            {/* SUPER ADMIN DASHBOARD */}
+            <Route path="/admin" element={
               <ProtectedRoute requiredRole="super_admin">
                 <AdminDashboard />
               </ProtectedRoute>
             } />
 
-            {/* KIOSK DASHBOARD */}
+            {/* KIOSK ADMIN DASHBOARD (Temporary Placeholder Mapping) */}
             <Route path="/kiosk-dashboard" element={
               <ProtectedRoute requiredRole="kiosk_admin">
                 <AdminDashboard /> 

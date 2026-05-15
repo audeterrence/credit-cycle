@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -23,40 +23,36 @@ const AdminDashboard = () => {
   const { toast } = useToast();
   const [tick, setTick] = useState(0);
 
-  // User lookup
+  // User Lookup state hooks
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  // Create user form
+  // Registration states
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newUsername, setNewUsername] = useState("");
   const [newFullName, setNewFullName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
 
-  // Waste submission form
+  // Input Collection states
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [weight, setWeight] = useState("");
 
-  useEffect(() => {
-    if (!user || user.role !== "ADMIN") navigate("/login", { replace: true });
-  }, [user, navigate]);
-
-  if (!user || user.role !== "ADMIN") return null;
+  // REDIRECT HOOK PURGED: Gateway route interceptors manage authorization access safely
+  if (!user) return null;
 
   const currentFocusWeek = getFocusWeek();
 
-  // Kiosk manager performance stats
-  const allSubs = getAllSubmissions();
+  // Metrics extraction logic
+  const allSubs = getAllSubmissions() || [];
   const todaySubs = allSubs.filter(s => new Date(s.created_at).toDateString() === new Date().toDateString());
   const todayCredits = todaySubs.reduce((a, s) => a + s.credits_awarded, 0);
   const todayUsers = new Set(todaySubs.map(s => s.user_id)).size;
   const totalSubs = allSubs.length;
   const totalCredits = allSubs.reduce((a, s) => a + s.credits_awarded, 0);
 
-  // Material breakdown for reports
   const materialBreakdown = MATERIALS.map(m => {
     const subs = allSubs.filter(s => s.material_id === m.id);
     return {
@@ -117,19 +113,23 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleLogout = () => { logout(); navigate("/"); };
+  const handleLogout = async () => {
+    await logout();
+    navigate("/");
+  };
 
   const userHistory = selectedUser ? getUserSubmissions(selectedUser.id).slice(-5).reverse() : [];
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Top bar */}
       <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-md">
         <div className="container flex h-16 items-center justify-between">
           <a href="/" className="flex items-center gap-2 font-display text-xl font-bold text-primary">
             <Recycle className="h-7 w-7" />
             Credi-Can
-            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">Kiosk</span>
+            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              {user.role === "super_admin" ? "Super Admin" : "Kiosk Admin"}
+            </span>
           </a>
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-muted-foreground">{user.full_name}</span>
@@ -139,7 +139,7 @@ const AdminDashboard = () => {
       </header>
 
       <main className="container max-w-5xl py-8 space-y-6">
-        {/* Quick stats bar */}
+        {/* Quick metrics bar */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard icon={<CheckCircle className="h-5 w-5 text-primary" />} label="Today's Submissions" value={todaySubs.length} />
           <StatCard icon={<Coins className="h-5 w-5 text-accent" />} label="Today's Credits" value={todayCredits} />
@@ -147,7 +147,7 @@ const AdminDashboard = () => {
           <StatCard icon={<Package className="h-5 w-5 text-primary" />} label="All-Time Submissions" value={totalSubs} />
         </div>
 
-        {/* Active Focus Week banner */}
+        {/* Focus Week Event Active handler */}
         {currentFocusWeek && (
           <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/10 p-3">
             <span className="text-lg">⚡</span>
@@ -165,9 +165,8 @@ const AdminDashboard = () => {
             <TabsTrigger value="profile" className="gap-1"><UserIcon className="h-4 w-4" /> Profile</TabsTrigger>
           </TabsList>
 
-          {/* ── Kiosk Tab ── */}
+          {/* Kiosk Operations Panel */}
           <TabsContent value="kiosk" className="space-y-6">
-            {/* Step 1: Find or Create User */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -229,7 +228,7 @@ const AdminDashboard = () => {
               </CardContent>
             </Card>
 
-            {/* Step 2: Submit Waste */}
+            {/* Waste Entry Module */}
             {selectedUser && (
               <Card>
                 <CardHeader>
@@ -238,9 +237,6 @@ const AdminDashboard = () => {
                   </CardTitle>
                   <CardDescription>
                     Enter materials brought by {selectedUser.full_name}. Credits are awarded instantly.
-                    {currentFocusWeek && (
-                      <span className="ml-1 text-accent font-semibold">⚡ Focus Week: {currentFocusWeek.label} ×{currentFocusWeek.multiplier}</span>
-                    )}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -296,15 +292,13 @@ const AdminDashboard = () => {
             )}
           </TabsContent>
 
-          {/* ── Reports Tab ── */}
+          {/* Reports Analytics Module */}
           <TabsContent value="reports" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-primary" /> Kiosk Performance</CardTitle>
-                <CardDescription>Summary of all collections processed at this kiosk.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Summary stats */}
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="rounded-lg border border-border bg-secondary/50 p-4 text-center">
                     <p className="text-2xl font-bold text-foreground">{totalSubs}</p>
@@ -320,7 +314,6 @@ const AdminDashboard = () => {
                   </div>
                 </div>
 
-                {/* Material breakdown */}
                 <div>
                   <p className="mb-3 text-sm font-semibold text-foreground">Material Breakdown</p>
                   <div className="overflow-x-auto rounded-lg border border-border">
@@ -352,12 +345,11 @@ const AdminDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* ── Profile Tab ── */}
+          {/* Profile Metadata panel view */}
           <TabsContent value="profile">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><UserIcon className="h-5 w-5 text-primary" /> My Profile</CardTitle>
-                <CardDescription>Your kiosk manager account details.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -367,7 +359,7 @@ const AdminDashboard = () => {
                     </div>
                     <div>
                       <p className="text-xl font-bold text-foreground">{user.full_name}</p>
-                      <p className="text-sm text-muted-foreground">@{user.username} · Kiosk Manager</p>
+                      <p className="text-sm text-muted-foreground">@{user.username} · Account Manager</p>
                     </div>
                   </div>
 
@@ -375,14 +367,14 @@ const AdminDashboard = () => {
                     <div className="flex items-center gap-3 rounded-lg border border-border p-3">
                       <Mail className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <p className="text-xs text-muted-foreground">Email</p>
+                        <p className="text-xs text-muted-foreground">Email Address</p>
                         <p className="text-sm font-medium text-foreground">{user.email}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 rounded-lg border border-border p-3">
                       <Phone className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <p className="text-xs text-muted-foreground">Phone</p>
+                        <p className="text-xs text-muted-foreground">Phone Connection</p>
                         <p className="text-sm font-medium text-foreground">{user.phone_number}</p>
                       </div>
                     </div>
@@ -396,8 +388,10 @@ const AdminDashboard = () => {
                     <div className="flex items-center gap-3 rounded-lg border border-border p-3">
                       <CheckCircle className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <p className="text-xs text-muted-foreground">Role</p>
-                        <p className="text-sm font-medium text-foreground">Kiosk Manager</p>
+                        <p className="text-xs text-muted-foreground">Security Clearance</p>
+                        <p className="text-sm font-medium text-foreground uppercase tracking-wider text-primary">
+                          {user.role}
+                        </p>
                       </div>
                     </div>
                   </div>

@@ -1,87 +1,96 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { User } from '@supabase/supabase-js';
 
-export type UserRole = 'user' | 'kiosk_admin' | 'super_admin';
+export type UserRole = 'user' | 'super_admin' | 'kiosk_admin';
 
-interface AuthContextType {
-  user: User | null;
-  profile: any | null;
-  role: UserRole | null;
-  loading: boolean;
-  signOut: () => Promise<void>;
+export interface MappedUser {
+  id: string;
+  username: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  role: UserRole;
+  total_credits: number;
+  created_at: string;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+interface AuthContextType {
+  user: MappedUser | null;
+  loading: boolean;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<any | null>(null);
-  const [role, setRole] = useState<UserRole | null>(null);
+  const [user, setUser] = useState<MappedUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Improved fetchProfile with better error handling
-  const fetchProfile = async (userId: string) => {
+  const fetchProfileAndMap = async (authId: string, email: string, createdAt: string) => {
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', authId)
         .single();
 
       if (error) throw error;
 
       if (data) {
-        setProfile(data);
-        setRole(data.role as UserRole);
+        setUser({
+          id: authId,
+          username: data.username || '',
+          full_name: data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim() || 'User',
+          email: data.email || email,
+          phone_number: data.phone_number || '',
+          role: (data.role as UserRole) || 'user',
+          total_credits: data.credits ?? data.total_credits ?? 0,
+          created_at: data.created_at || createdAt,
+        });
       }
     } catch (err) {
-      console.error("AuthContext: Error fetching profile:", err);
+      console.error("AuthContext: Profile fetching error:", err);
+      setUser(null);
     }
   };
 
+  const handleAuthChange = useCallback(async (session: any) => {
+    if (session?.user) {
+      await fetchProfileAndMap(session.user.id, session.user.email || '', session.user.created_at);
+    } else {
+      setUser(null);
+    }
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
-    const initialize = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          setUser(session.user);
-          // CRITICAL: We await the profile so the role is available immediately
-          await fetchProfile(session.user.id);
-        }
-      } catch (err) {
-        console.error("AuthContext: Initialization error:", err);
-      } finally {
-        // Always stop loading, regardless of success or failure
-        setLoading(false);
-      }
-    };
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleAuthChange(session);
+    });
 
-    initialize();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setLoading(true); // Restart loading on state change to prevent role mismatch
-      if (session) {
-        setUser(session.user);
-        await fetchProfile(session.user.id);
-      } else {
-        setUser(null);
-        setProfile(null);
-        setRole(null);
-      }
-      setLoading(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      handleAuthChange(session);
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [handleAuthChange]);
 
-  const signOut = async () => {
+  const logout = async () => {
     setLoading(true);
     await supabase.auth.signOut();
+    setUser(null);
+    setLoading(false);
+  };
+
+  const refresh = async () => {
+    if (user?.id) {
+      await fetchProfileAndMap(user.id, user.email, user.created_at);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );
@@ -89,6 +98,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

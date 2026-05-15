@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getUserSubmissions, getUserTransactions, getUserMaterialStats,
-  MATERIALS, REWARDS, redeemReward,
+  REWARDS, redeemReward,
 } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
 
@@ -27,15 +27,12 @@ const Dashboard = () => {
   const { toast } = useToast();
   const [, setTick] = useState(0);
 
-  useEffect(() => {
-    if (!user) navigate("/login", { replace: true });
-  }, [user, navigate]);
-
+  // REDIRECT HOOK PURGED: Control delegated safely to App.tsx wrapper logic
   if (!user) return null;
 
-  const submissions = getUserSubmissions(user.id);
-  const materialStats = getUserMaterialStats(user.id);
-  const transactions = getUserTransactions(user.id);
+  const submissions = getUserSubmissions(user.id) || [];
+  const materialStats = getUserMaterialStats(user.id) || [];
+  const transactions = getUserTransactions(user.id) || [];
   const recentTransactions = transactions.slice(-10).reverse();
   const totalUnits = submissions.reduce((a, s) => a + s.quantity_units, 0);
 
@@ -50,8 +47,8 @@ const Dashboard = () => {
     }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
   };
 
@@ -74,7 +71,7 @@ const Dashboard = () => {
       </header>
 
       <main className="container max-w-5xl py-8 space-y-8">
-        {/* ── Profile Card ── */}
+        {/* Profile Card */}
         <Card>
           <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:gap-6">
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -97,14 +94,14 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* ── Summary cards ── */}
+        {/* Summary metrics widgets */}
         <div className="grid gap-4 sm:grid-cols-3">
           <SummaryCard icon={<Coins className="h-6 w-6 text-accent" />} label="Total Earned" value={transactions.filter(t => t.amount > 0).reduce((a, t) => a + t.amount, 0)} />
           <SummaryCard icon={<Trophy className="h-6 w-6 text-primary" />} label="Submissions" value={submissions.length} />
           <SummaryCard icon={<Package className="h-6 w-6 text-bin-orange" />} label="Total Units" value={totalUnits} />
         </div>
 
-        {/* ── Tabbed sections ── */}
+        {/* Tab views layout section */}
         <Tabs defaultValue="activity" className="space-y-4">
           <TabsList className="w-full justify-start">
             <TabsTrigger value="activity" className="gap-1"><Bell className="h-4 w-4" /> Activity</TabsTrigger>
@@ -112,7 +109,7 @@ const Dashboard = () => {
             <TabsTrigger value="rewards" className="gap-1"><Trophy className="h-4 w-4" /> Rewards</TabsTrigger>
           </TabsList>
 
-          {/* ── Activity / Notifications ── */}
+          {/* Activity / Transactions Timeline tab */}
           <TabsContent value="activity">
             <Card>
               <CardHeader>
@@ -138,7 +135,7 @@ const Dashboard = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground truncate">{t.description}</p>
-                          <p className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleDateString()} · {new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                          <p className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleDateString()}</p>
                         </div>
                         <span className={`text-sm font-bold ${t.amount > 0 ? "text-primary" : "text-destructive"}`}>
                           {t.amount > 0 ? "+" : ""}{t.amount}
@@ -151,7 +148,7 @@ const Dashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* ── Materials ── */}
+          {/* Materials breakdown tab view */}
           <TabsContent value="materials">
             <Card>
               <CardHeader>
@@ -174,7 +171,7 @@ const Dashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* ── Rewards ── */}
+          {/* Rewards marketplace tab layout view */}
           <TabsContent value="rewards">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {REWARDS.filter((r) => r.is_active).map((r) => (
